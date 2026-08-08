@@ -82,12 +82,35 @@
     if (Number.isFinite(q.minMileage)) params.set("minMileage", String(Math.max(0, q.minMileage)));
     if (Number.isFinite(q.maxMileage)) params.set("maxMileage", String(q.maxMileage));
 
-    const res = await fetch("/Cars/searchResults.action?" + params.toString(), {
-      headers: { accept: "application/json" },
-      credentials: "include"
-    });
-    if (!res.ok) throw new Error("CarGurus returned HTTP " + res.status);
-    const data = await res.json();
+    // Hard timeout on the network call itself. A CarGurus bot-check page can hold
+    // the connection open indefinitely; without this the whole search hangs.
+    const ctrl = new AbortController();
+    const killer = setTimeout(() => ctrl.abort(), 12000);
+    let res;
+    try {
+      res = await fetch("/Cars/searchResults.action?" + params.toString(), {
+        headers: { accept: "application/json" },
+        credentials: "include",
+        signal: ctrl.signal
+      });
+    } catch (e) {
+      if (e && e.name === "AbortError") {
+        throw new Error("CarGurus didn't respond within 12s (it may be showing a verification page).");
+      }
+      throw e;
+    } finally {
+      clearTimeout(killer);
+    }
+    if (!res.ok) throw new Error("CarGurus returned HTTP " + res.status + ".");
+    // Detect a verification/HTML interstitial instead of the JSON we expect.
+    const ctype = res.headers.get("content-type") || "";
+    const body = await res.text();
+    if (!/json/i.test(ctype) || /^\s*</.test(body)) {
+      throw new Error("CarGurus returned a verification/HTML page instead of data. Open cargurus.com, clear any “verify you’re human” prompt, then search again.");
+    }
+    let data;
+    try { data = JSON.parse(body); }
+    catch (e) { throw new Error("CarGurus returned an unreadable response (possible verification page)."); }
     return Array.isArray(data) ? data : [];
   }
 

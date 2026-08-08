@@ -353,6 +353,118 @@ function card(k, v, sub, cls) {
 }
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
+// ---------------------------------------------------------------------------
+// Search orchestration — run entirely from the panel (a persistent page), NOT
+// the background service worker. Chrome can suspend the worker mid-search and
+// drop its reply, which left the panel spinning forever. The panel isn't
+// suspended, and every step reports a live stage so a stall is visible.
+// ---------------------------------------------------------------------------
+const CG_START_URL = "https://www.cargurus.com/Cars/spt-used-cars";
+
+// Update the spinner's label so the user (and a screenshot) can see the stage.
+function showStage(msg) {
+  $("err").hidden = true;
+  $("results").hidden = true;
+  $("empty").hidden = true;
+  const l = $("loading");
+  l.hidden = false;
+  const span = l.querySelector("span");
+  if (span) span.textContent = msg || "Searching CarGurus…";
+}
+
+function pingCG(tabId) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      chrome.tabs.sendMessage(tabId, { type: "PING_CG" }, (resp) => {
+        void chrome.runtime.lastError; // swallow "no receiver"
+        finish(!!(resp && resp.ok));
+      });
+    } catch (e) { finish(false); }
+    setTimeout(() => finish(false), 800);
+  });
+}
+
+async function waitForCG(tabId, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await pingCG(tabId)) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+async function ensureCarGurusTab(stage) {
+  stage("Looking for a CarGurus tab…");
+  const tabs = await chrome.tabs.query({ url: "https://*.cargurus.com/*" });
+  let tab = tabs.find((t) => t.status === "complete") || tabs[0] || null;
+  let created = false;
+  if (!tab) {
+    stage("Opening CarGurus in the background…");
+    tab = await chrome.tabs.create({ url: CG_START_URL, active: false });
+    created = true;
+  }
+
+  stage("Waiting for CarGurus to load…");
+  let ready = await waitForCG(tab.id, created ? 25000 : 4000);
+
+  if (!ready) {
+    stage("Preparing CarGurus…");
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["cargurus-makes.js", "content-cargurus.js"] });
+      ready = await waitForCG(tab.id, 5000);
+    } catch (e) { /* ignore */ }
+  }
+  if (!ready) {
+    stage("Reloading CarGurus…");
+    try {
+      await chrome.tabs.reload(tab.id);
+      ready = await waitForCG(tab.id, 25000);
+    } catch (e) { /* ignore */ }
+  }
+  if (!ready) {
+    // Bring the CarGurus tab to the front so the user can see/clear a CAPTCHA.
+    try {
+      await chrome.tabs.update(tab.id, { active: true });
+      await chrome.windows.update(tab.windowId, { focused: true });
+    } catch (e) { /* ignore */ }
+    throw new Error("Couldn't reach CarGurus. I brought the CarGurus tab to the front — if it's showing a “verify you're human”/CAPTCHA page, clear it, come back here, and click Find comps again.");
+  }
+  return tab.id;
+}
+
+function runSearchOnTab(tabId, spec) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const to = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error("CarGurus took over 60s to answer. It may be showing a verification page — open cargurus.com, clear it, then retry."));
+    }, 60000);
+    try {
+      chrome.tabs.sendMessage(tabId, { type: "RUN_SEARCH", spec }, (resp) => {
+        if (done) return;
+        done = true;
+        clearTimeout(to);
+        const err = chrome.runtime.lastError;
+        if (err) return reject(new Error("Lost contact with the CarGurus tab: " + err.message));
+        resolve(resp || { ok: false, error: "No response from the CarGurus tab." });
+      });
+    } catch (e) {
+      if (!done) { done = true; clearTimeout(to); reject(e); }
+    }
+  });
+}
+
+async function searchComps(spec, stage) {
+  const tabId = await ensureCarGurusTab(stage);
+  stage("Searching CarGurus…");
+  const result = await runSearchOnTab(tabId, spec);
+  try { await chrome.storage.local.set({ lastResult: result, lastSpec: spec, lastRun: Date.now() }); } catch (e) { /* ignore */ }
+  return result;
+}
+
 async function findComps() {
   const spec = gatherSpec();
   const problem = validate(spec);
@@ -367,33 +479,15 @@ async function findComps() {
   });
 
   $("findBtn").disabled = true;
-  $("results").hidden = true;
-  $("empty").hidden = true;
-  $("loading").hidden = false;
-
-  // Safety net: never spin forever. If the background worker gets suspended
-  // mid-search (a Chrome MV3 quirk) its reply can be lost, leaving the panel
-  // stuck. Fail loudly with guidance after a hard timeout instead.
-  let settled = false;
-  const guard = setTimeout(() => {
-    if (settled) return;
-    settled = true;
-    $("findBtn").disabled = false;
-    render({ ok: false, error:
-      "CarGurus didn't respond in time. Two things to check: (1) open cargurus.com in a tab and clear any “verify you’re human” page, then try again; (2) if that's clear, just click Find comps once more — the background can nod off between searches." }, spec);
-  }, 90000);
-
-  chrome.runtime.sendMessage({ type: "FIND_COMPS", spec }, (result) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(guard);
-    $("findBtn").disabled = false;
-    if (chrome.runtime.lastError) {
-      render({ ok: false, error: chrome.runtime.lastError.message }, spec);
-      return;
-    }
+  showStage("Starting…");
+  try {
+    const result = await searchComps(spec, showStage);
     render(result, spec);
-  });
+  } catch (e) {
+    render({ ok: false, error: String((e && e.message) || e) }, spec);
+  } finally {
+    $("findBtn").disabled = false;
+  }
 }
 
 async function printComps() {
@@ -405,18 +499,13 @@ async function printComps() {
   const btn = $("printBtn");
   const status = $("printStatus");
   btn.disabled = true;
-  status.textContent = "Finding the cheapest within 500 mi…";
 
   // Force a 500-mi search and a big pool so we surface the truly cheapest comps.
   const printSpec = Object.assign({}, spec, { radius: 500, targetCount: 40 });
 
-  chrome.runtime.sendMessage({ type: "FIND_COMPS", spec: printSpec }, async (result) => {
-    btn.disabled = false;
-    if (chrome.runtime.lastError || !result || !result.ok) {
-      status.textContent = (result && result.error) ||
-        (chrome.runtime.lastError && chrome.runtime.lastError.message) || "Search failed.";
-      return;
-    }
+  try {
+    const result = await searchComps(printSpec, (m) => { status.textContent = m; });
+    if (!result || !result.ok) { status.textContent = (result && result.error) || "Search failed."; return; }
     const cheapest = (result.cheapest || []).slice(0, 24);
     if (!cheapest.length) { status.textContent = "No comparable listings found."; return; }
     await chrome.storage.local.set({
@@ -431,7 +520,11 @@ async function printComps() {
     status.textContent = "Opening printable page…";
     chrome.tabs.create({ url: chrome.runtime.getURL("print.html") });
     setTimeout(() => { status.textContent = ""; }, 2500);
-  });
+  } catch (e) {
+    status.textContent = String((e && e.message) || e);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function persistDealDefaults() {
