@@ -440,8 +440,8 @@ function runSearchOnTab(tabId, spec) {
     const to = setTimeout(() => {
       if (done) return;
       done = true;
-      reject(new Error("CarGurus took over 60s to answer. It may be showing a verification page — open cargurus.com, clear it, then retry."));
-    }, 60000);
+      reject(new Error("CarGurus took over 2 minutes to answer. It may be showing a verification page — open cargurus.com, clear it, then retry."));
+    }, 120000);
     try {
       chrome.tabs.sendMessage(tabId, { type: "RUN_SEARCH", spec }, (resp) => {
         if (done) return;

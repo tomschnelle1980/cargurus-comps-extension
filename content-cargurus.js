@@ -85,7 +85,7 @@
     // Hard timeout on the network call itself. A CarGurus bot-check page can hold
     // the connection open indefinitely; without this the whole search hangs.
     const ctrl = new AbortController();
-    const killer = setTimeout(() => ctrl.abort(), 12000);
+    const killer = setTimeout(() => ctrl.abort(), 20000);
     let res;
     try {
       res = await fetch("/Cars/searchResults.action?" + params.toString(), {
@@ -95,7 +95,7 @@
       });
     } catch (e) {
       if (e && e.name === "AbortError") {
-        throw new Error("CarGurus didn't respond within 12s (it may be showing a verification page).");
+        throw new Error("CarGurus didn't respond within 20s (it may be showing a verification page).");
       }
       throw e;
     } finally {
