@@ -35,6 +35,9 @@ async function cycleTheme() {
 
 // Pricing from the currently-selected comps; deal math recomputes live from it.
 let currentPricing = null;
+// True once the user types/jumps their own ACV, so selection changes stop
+// re-seeding it. Reset on each new search.
+let acvUserEdited = false;
 // Inventory Plus market data (TrueScore Market + TrueTarget) read off the page.
 let subjectExtra = null;
 
@@ -404,7 +407,10 @@ function applySelection(resetAcv) {
   currentPricing = computePricingLocal(sel);
   renderChips(currentPricing);
   if (note) note.innerHTML = "Pricing from <b>" + sel.length + "</b> of <b>" + currentComps.length + "</b> selected comps.";
-  if (resetAcv && Number.isFinite(currentPricing.goodDealPrice)) {
+  // Re-seed the ACV to the Good-Deal buy on a fresh search, and on any selection
+  // change UNLESS the user has typed/jumped their own ACV (then keep theirs).
+  if (resetAcv) acvUserEdited = false;
+  if ((resetAcv || !acvUserEdited) && Number.isFinite(currentPricing.goodDealPrice)) {
     const costs = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value) + num($("targetGross").value);
     $("acv").value = Math.max(0, Math.round(currentPricing.goodDealPrice - costs)).toLocaleString("en-US");
   }
@@ -850,7 +856,8 @@ async function persistDealDefaults() {
   $("mileage").addEventListener("change", () => centerMileageWindow($("mileage").value));
 
   // Deal-math build-up: ACV is editable; quick buttons jump ACV to a rating.
-  $("acv").addEventListener("input", renderDealMath);
+  // Typing or jumping marks ACV as user-set so comp toggles won't overwrite it.
+  $("acv").addEventListener("input", () => { acvUserEdited = true; renderDealMath(); });
   $("acv").addEventListener("blur", () => { $("acv").value = acvVal().toLocaleString("en-US"); });
   $("quick").addEventListener("click", (e) => {
     const b = e.target.closest("button");
@@ -860,6 +867,7 @@ async function persistDealDefaults() {
     if (!Number.isFinite(target)) return;
     const costs = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value) + num($("targetGross").value);
     $("acv").value = Math.max(0, Math.round(target - costs)).toLocaleString("en-US");
+    acvUserEdited = true;
     renderDealMath();
   });
 
