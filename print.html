@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Comparable Listings</title>
+  <style>
+    :root { --ink:#1a1d23; --muted:#5c6672; --line:#d9dee5; --accent:#1558d6; --price:#0f7a3d; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #f2f4f7; color: var(--ink);
+      font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .sheet { max-width: 900px; margin: 0 auto; background: #fff; padding: 28px 34px 40px; min-height: 100vh; }
+
+    .toolbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px;
+      flex-wrap: wrap; background: #fff; border-bottom: 1px solid var(--line);
+      padding: 12px 34px; }
+    .toolbar .hint { color: var(--muted); font-size: 13px; margin-right: auto; }
+    .toolbar button { font: inherit; padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px;
+      background: #fff; color: var(--ink); cursor: pointer; }
+    .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+    .toolbar button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
+    .toolbar button.primary:hover { filter: brightness(1.07); color: #fff; }
+    .toolbar button:disabled { opacity: .5; cursor: default; }
+
+    header { border-bottom: 2px solid var(--ink); padding-bottom: 12px; margin-bottom: 18px; }
+    header h1 { font-size: 22px; margin: 0 0 4px; }
+    header .subject { font-size: 16px; font-weight: 700; }
+    header .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .pcard { position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+      background: #fff; break-inside: avoid; page-break-inside: avoid; display: flex; flex-direction: column;
+      transition: opacity .12s, box-shadow .12s; }
+    .pcard { cursor: grab; }
+    .pcard.selected { box-shadow: 0 0 0 2px var(--accent); }
+    .pcard.excluded { opacity: .38; }
+    .pcard.dragging { opacity: .5; cursor: grabbing; }
+    .drag { position: absolute; top: 8px; right: 8px; z-index: 2; color: #55627a;
+      background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 6px;
+      padding: 1px 7px; font-size: 14px; line-height: 1.3; cursor: grab; }
+    .pick { position: absolute; top: 8px; left: 8px; z-index: 2; display: flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 999px;
+      padding: 4px 10px 4px 8px; font-size: 12px; font-weight: 700; cursor: pointer; user-select: none; }
+    .pick input { width: 15px; height: 15px; cursor: pointer; margin: 0; }
+    .pphoto { width: 100%; aspect-ratio: 4 / 3; background: #eef1f5; overflow: hidden; }
+    .pphoto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .pphoto .noimg { display: flex; align-items: center; justify-content: center; height: 100%; color: #9aa4b0; font-size: 12px; }
+    .pbody { padding: 10px 12px 12px; }
+    .pprice { font-size: 22px; font-weight: 800; color: var(--price); }
+    .ptitle { font-size: 14px; font-weight: 700; margin-top: 2px; }
+    .pmeta { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+    .pdealer { font-size: 12px; color: var(--muted); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+
+    footer { margin-top: 22px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+
+    @media print {
+      html, body { background: #fff; }
+      .noprint { display: none !important; }
+      .sheet { max-width: none; margin: 0; padding: 0 8px; box-shadow: none; }
+      .grid { gap: 12px; }
+      .pcard.excluded { display: none !important; }
+      .pcard.selected { box-shadow: none; }
+      .pick { display: none !important; }
+      @page { margin: 0.5in; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar noprint">
+    <span class="hint" id="selHint">Check the units you want on the printout.</span>
+    <button id="selectCheapest" type="button">Select cheapest 6</button>
+    <button id="clearAll" type="button">Clear all</button>
+    <button id="printNow" class="primary" type="button">Print</button>
+  </div>
+
+  <div class="sheet">
+    <header>
+      <h1>Comparable Market Listings</h1>
+      <div class="subject" id="subject">—</div>
+      <div class="meta" id="meta">—</div>
+    </header>
+    <div class="grid" id="grid"></div>
+    <footer id="footer"></footer>
+  </div>
+
+  <script src="print.js"></script>
+</body>
+</html>

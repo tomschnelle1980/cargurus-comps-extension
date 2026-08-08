@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CarGurus Comps — Settings</title>
+  <style>
+    :root, :root[data-theme="light"] { --bg:#fff; --panel:#f6f7f9; --border:#e2e5ea; --text:#1a1d23; --muted:#6b7280; --accent:#1558d6; --accent-ink:#fff; }
+    :root[data-theme="dark"] { --bg:#16181d; --panel:#1e2128; --border:#2c313a; --text:#e6e8ec; --muted:#9aa1ad; --accent:#4f8cff; --accent-ink:#0c1220; }
+    @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#16181d; --panel:#1e2128; --border:#2c313a; --text:#e6e8ec; --muted:#9aa1ad; --accent:#4f8cff; --accent-ink:#0c1220; } }
+    * { box-sizing: border-box; }
+    body { font: 14px/1.5 -apple-system,"Segoe UI",Roboto,Arial,sans-serif; background: var(--bg); color: var(--text); max-width: 640px; margin: 0 auto; padding: 28px 22px 60px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p.lead { color: var(--muted); margin-top: 0; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 26px 0 10px; }
+    .row { display: grid; grid-template-columns: 160px 1fr; gap: 12px; align-items: center; margin-bottom: 10px; }
+    label { color: var(--text); }
+    .hint { color: var(--muted); font-size: 12px; }
+    input, select { font: inherit; width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    button { margin-top: 18px; padding: 10px 18px; border: none; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 14px; cursor: pointer; }
+    .saved { color: #1e874b; margin-left: 12px; font-weight: 600; }
+    code { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--accent); }
+  </style>
+</head>
+<body>
+  <h1>CarGurus Comps — Settings</h1>
+  <p class="lead">Defaults for the comp search, plus optional field mapping so the extension reliably reads the car off your Inventory Plus screen.</p>
+
+  <div class="card">
+    <h2>Search defaults</h2>
+    <div class="row">
+      <label for="zip">Dealership ZIP</label>
+      <div><input id="zip" inputmode="numeric" placeholder="33544" /><div class="hint">Center of the comp search radius.</div></div>
+    </div>
+    <div class="row">
+      <label for="radius">Default radius</label>
+      <select id="radius">
+        <option value="25">25 mi</option><option value="50">50 mi</option>
+        <option value="75">75 mi</option><option value="100">100 mi</option>
+        <option value="150">150 mi</option><option value="200">200 mi</option><option value="500">500 mi</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="variance">Mileage variance</label>
+      <div><input id="variance" inputmode="numeric" placeholder="10000" /><div class="hint">± miles around the subject vehicle (default 10,000).</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Deal math defaults</h2>
+    <p class="hint">Store constants used to back into the max purchase price. You can still override any of these per-vehicle in the popup.</p>
+    <div class="row">
+      <label for="dealerFee">Dealer fee</label>
+      <div><input id="dealerFee" inputmode="numeric" placeholder="995" /><div class="hint">Doc/dealer fee you collect (income).</div></div>
+    </div>
+    <div class="row">
+      <label for="titleFee">Title fee</label>
+      <div><input id="titleFee" inputmode="numeric" placeholder="410" /><div class="hint">Title/registration cost.</div></div>
+    </div>
+    <div class="row">
+      <label for="targetGross">Target gross</label>
+      <div><input id="targetGross" inputmode="numeric" placeholder="2500" /><div class="hint">Minimum front-end gross you want to hit (default $2,500).</div></div>
+    </div>
+    <div class="row">
+      <label for="reconDefault">Default recon</label>
+      <div><input id="reconDefault" inputmode="numeric" placeholder="2500" /><div class="hint">Starting recon each search (default $2,500). Editable per vehicle in the popup.</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Inventory Plus field mapping <span class="hint">(optional)</span></h2>
+    <p class="hint">The extension already tries to auto-read the vehicle. If your Inventory Plus layout isn't picked up reliably, paste CSS selectors for each field here to lock it in.
+      <details><summary>How to find a selector</summary>
+        <p class="hint">On the Inventory Plus vehicle page: right-click the value → <b>Inspect</b> → right-click the highlighted element → <b>Copy → Copy selector</b>, then paste it below. Leave blank to keep using auto-read.</p>
+      </details>
+    </p>
+    <div class="row"><label for="selYear">Year</label><input id="selYear" placeholder="e.g. .vehicle-year" /></div>
+    <div class="row"><label for="selMake">Make</label><input id="selMake" placeholder="e.g. .vehicle-make" /></div>
+    <div class="row"><label for="selModel">Model</label><input id="selModel" placeholder="e.g. .vehicle-model" /></div>
+    <div class="row"><label for="selTrim">Trim</label><input id="selTrim" placeholder="e.g. .vehicle-trim" /></div>
+    <div class="row"><label for="selMileage">Mileage</label><input id="selMileage" placeholder="e.g. .vehicle-odometer" /></div>
+  </div>
+
+  <button id="save">Save settings</button><span id="saved" class="saved" hidden>Saved ✓</span>
+
+  <script src="options.js"></script>
+</body>
+</html>

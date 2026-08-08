@@ -1,0 +1,57 @@
+CARGURUS COMPS FOR INVENTORY PLUS — INSTALL INSTRUCTIONS
+=========================================================
+
+WHAT THIS IS
+An extension for Chrome or Edge. On an Inventory Plus vehicle, click the
+button to pull comparable CarGurus listings, market value, Good/Great deal
+pricing, max-buy for your target gross, competition counts, and a printable
+"comparable units" handout for customers.
+
+-----------------------------------------------------------------
+STEP 1 — UNZIP TO A PERMANENT FOLDER
+-----------------------------------------------------------------
+Right-click this zip -> Extract All.
+Extract to a spot it can live long-term, for example:
+    C:\Tools\cargurus-comps-extension
+IMPORTANT: Do NOT delete or move the folder after installing. Chrome/Edge
+runs the extension straight from this folder. If it moves, the extension
+stops working (just Load unpacked again from the new location if so).
+
+-----------------------------------------------------------------
+STEP 2 — LOAD IT (same steps for Chrome or Edge)
+-----------------------------------------------------------------
+1. Open the browser and go to:
+       Chrome:  chrome://extensions
+       Edge:    edge://extensions
+2. Turn ON "Developer mode" (toggle, top-right in Chrome / left side in Edge).
+3. Click "Load unpacked".
+4. Select the unzipped folder (the one that contains manifest.json).
+5. Click the puzzle-piece icon in the toolbar and pin "CarGurus Comps".
+
+-----------------------------------------------------------------
+STEP 3 — SET IT UP (one time)
+-----------------------------------------------------------------
+Click the extension -> Settings, then enter:
+   - Dealership ZIP (search center)
+   - Dealer fee (e.g. 995)
+   - Title fee (e.g. 410)
+   - Target gross (e.g. 2500)
+   - Default recon (e.g. 2500)
+Save.
+
+-----------------------------------------------------------------
+DAILY USE
+-----------------------------------------------------------------
+1. Open the vehicle in Inventory Plus.
+2. Click the extension button (it auto-reads the car).
+3. Click "Find comps".
+4. Use the dashboard, or click "Print comparable units" for the handout
+   (check/uncheck and drag to reorder which ones to print).
+
+-----------------------------------------------------------------
+IF DEVELOPER MODE IS BLOCKED
+-----------------------------------------------------------------
+Some work computers are managed by corporate IT, which can block
+"Developer mode / Load unpacked." If the toggle is greyed out or you see a
+policy message, that is an IT setting, not the extension. Ask IT to allow it,
+or reach back out for a packaged install option.

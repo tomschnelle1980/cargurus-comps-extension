@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="popup.css" />
+  <title>CarGurus Comps</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span>CarGurus Comps</span>
+    </div>
+    <div class="topbar-actions">
+      <button id="themeBtn" class="linkbtn theme" title="Toggle light / dark / auto">🌗 Auto</button>
+      <button id="openOptions" class="linkbtn" title="Settings">Settings</button>
+    </div>
+  </header>
+
+  <section class="subject">
+    <div class="subject-head">
+      <h2>Vehicle being appraised</h2>
+      <div class="subject-head-actions">
+        <button id="readBtn" class="linkbtn" title="Re-read Year / Make / Model / Trim from the tab you're on now">↻ Read this tab</button>
+        <span id="readStatus" class="pill">Reading page…</span>
+      </div>
+    </div>
+    <div class="grid">
+      <label>Year<input id="year" type="number" inputmode="numeric" placeholder="2021" /></label>
+      <label>Make<input id="make" type="text" placeholder="Mercedes-Benz" /></label>
+      <label>Model<input id="model" type="text" placeholder="C-Class" /></label>
+      <label>Trim<input id="trim" type="text" placeholder="C 300 4MATIC" /></label>
+      <label>Mileage<input id="mileage" type="number" inputmode="numeric" placeholder="32000" /></label>
+    </div>
+
+    <div class="grid params">
+      <label>Search ZIP<input id="zip" type="text" inputmode="numeric" placeholder="33544" /></label>
+      <label>Radius (mi)
+        <select id="radius">
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="75">75</option>
+          <option value="100" selected>100</option>
+          <option value="150">150</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+        </select>
+      </label>
+      <label>Mileage +/-<input id="variance" type="number" inputmode="numeric" value="10000" /></label>
+      <label class="chk">
+        <input id="strictTrim" type="checkbox" checked /> Match trim
+      </label>
+    </div>
+
+    <button id="findBtn" class="primary">Find comps</button>
+    <p id="err" class="err" hidden></p>
+  </section>
+
+  <section id="results" class="results" hidden>
+    <div class="topbuy" id="topbuy" hidden></div>
+    <div class="summary" id="summary"></div>
+    <div class="matchline" id="matchline"></div>
+
+    <div class="results-actions">
+      <button id="printBtn" class="secondary" type="button">🖨 Print comparable units</button>
+      <span id="printStatus" class="print-status"></span>
+    </div>
+
+    <div class="dealmath">
+      <h3>Deal math — max buy for your target gross</h3>
+      <div class="grid dm-inputs">
+        <label>Recon $<input id="recon" type="number" inputmode="numeric" value="2500" /></label>
+        <label>Dealer fee $<input id="dealerFee" type="number" inputmode="numeric" placeholder="995" /></label>
+        <label>Title fee $<input id="titleFee" type="number" inputmode="numeric" placeholder="410" /></label>
+        <label>Target gross $<input id="targetGross" type="number" inputmode="numeric" value="2500" /></label>
+      </div>
+      <div id="maxbuy" class="maxbuy"></div>
+      <p class="dm-formula">Max buy = List price + Dealer fee − Recon − Title fee − Target gross</p>
+    </div>
+
+    <div class="market" id="market"></div>
+
+    <div class="tablewrap">
+      <table id="compTable">
+        <thead>
+          <tr>
+            <th>Year / Trim</th>
+            <th class="num">Miles</th>
+            <th class="num">Price</th>
+            <th class="num">Mkt (IMV)</th>
+            <th>Rating</th>
+            <th class="num">Days</th>
+            <th class="num">Dist</th>
+            <th>Dealer</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="empty" class="empty" hidden></section>
+
+  <div id="loading" class="loading" hidden>
+    <div class="spinner"></div>
+    <span>Searching CarGurus…</span>
+  </div>
+
+  <script src="cargurus-makes.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
