@@ -209,6 +209,104 @@ function ratingLabel(r) {
   return ({ GREAT_PRICE: "Great", GOOD_PRICE: "Good", FAIR_PRICE: "Fair", HIGH_PRICE: "High", OVERPRICED: "Over" })[r] || "—";
 }
 
+// --- Comp selection & client-side re-pricing -------------------------------
+// Each comp row has a checkbox; Market IMV / Good / Great and the deal math are
+// computed from ONLY the checked comps, so an appraiser can drop a higher-trim
+// or outlier listing that would skew the value. Mirrors the server-side
+// computePricing so the numbers match when the same comps are selected.
+let currentComps = [];
+let currentSpec = null;
+let selectedKeys = new Set();
+
+const RATING_RANK_P = { GREAT_PRICE: 5, GOOD_PRICE: 4, FAIR_PRICE: 3, HIGH_PRICE: 2, OVERPRICED: 1 };
+const RATING_LABEL_P = {
+  GREAT_PRICE: "Great Deal", GOOD_PRICE: "Good Deal", FAIR_PRICE: "Fair Deal",
+  HIGH_PRICE: "High Priced", OVERPRICED: "Overpriced",
+  NO_PRICE_ANALYSIS: "No Analysis", NO_ANALYSIS: "No Analysis", UNCERTAIN: "No Analysis"
+};
+const medP = (nums) => {
+  const a = nums.filter(Number.isFinite).slice().sort((x, y) => x - y);
+  if (!a.length) return null;
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+};
+
+function computePricingLocal(comps) {
+  const withImv = comps.filter((c) => Number.isFinite(c.expectedPrice) && c.expectedPrice > 0);
+  const prices = comps.map((c) => c.price).filter(Number.isFinite);
+  const subjectImv = medP(withImv.map((c) => c.expectedPrice)) || medP(prices);
+
+  const ratioByRating = {};
+  for (const c of withImv) {
+    if (!RATING_RANK_P[c.dealRating]) continue;
+    (ratioByRating[c.dealRating] = ratioByRating[c.dealRating] || []).push(c.price / c.expectedPrice);
+  }
+  const ceilRatio = (r) => { const arr = ratioByRating[r]; return arr && arr.length ? Math.max(...arr) : null; };
+  let greatRatio = ceilRatio("GREAT_PRICE");
+  let goodRatio = ceilRatio("GOOD_PRICE");
+  if (goodRatio == null && greatRatio != null) goodRatio = greatRatio;
+  if (greatRatio == null) greatRatio = 0.94;
+  if (goodRatio == null) goodRatio = 0.98;
+
+  const doms = comps.map((c) => c.daysOnMarket).filter(Number.isFinite);
+  return {
+    subjectImv: subjectImv ? Math.round(subjectImv) : null,
+    goodDealPrice: subjectImv ? Math.round(subjectImv * goodRatio) : null,
+    greatDealPrice: subjectImv ? Math.round(subjectImv * greatRatio) : null,
+    medianDaysOnMarket: doms.length ? Math.round(medP(doms)) : null,
+    medianAsking: medP(prices),
+    lowAsking: prices.length ? Math.min(...prices) : null,
+    highAsking: prices.length ? Math.max(...prices) : null,
+    ratingCounts: comps.reduce((m, c) => { const l = RATING_LABEL_P[c.dealRating] || "No Analysis"; m[l] = (m[l] || 0) + 1; return m; }, {}),
+    basis: withImv.length
+  };
+}
+
+function selectedComps() {
+  return currentComps.filter((c) => selectedKeys.has(c._key));
+}
+
+function syncSelAll() {
+  const selAll = $("selAll");
+  if (!selAll) return;
+  const total = currentComps.length;
+  const n = selectedKeys.size;
+  selAll.checked = total > 0 && n === total;
+  selAll.indeterminate = n > 0 && n < total;
+}
+
+// Recompute the headline value + deal math from the checked comps only.
+function applySelection() {
+  const sel = selectedComps();
+  const note = $("selnote");
+  if (!sel.length) {
+    $("summary").innerHTML =
+      card("Market value (IMV)", "—", "select comps below") +
+      card("List for “Good Deal”", "—", "≤ this shows Good", "good") +
+      card("List for “Great Deal”", "—", "≤ this shows Great", "great");
+    if (note) note.innerHTML = "<b>No comps selected.</b> Check at least one row below to price this car.";
+    lastPricing = null;
+    renderDealMath();
+    syncSelAll();
+    return;
+  }
+  const pricing = computePricingLocal(sel);
+  $("summary").innerHTML =
+    card("Market value (IMV)", fmt$(pricing.subjectImv), "CarGurus avg for this car") +
+    card("List for “Good Deal”", fmt$(pricing.goodDealPrice), "≤ this shows Good", "good") +
+    card("List for “Great Deal”", fmt$(pricing.greatDealPrice), "≤ this shows Great", "great");
+  if (note) {
+    note.innerHTML =
+      "Pricing from <b>" + sel.length + "</b> of <b>" + currentComps.length + "</b> comps" +
+      " · asking <b>" + fmt$(pricing.lowAsking) + "</b>–<b>" + fmt$(pricing.highAsking) + "</b>" +
+      " · median <b>" + fmt$(pricing.medianAsking) + "</b>" +
+      (Number.isFinite(pricing.medianDaysOnMarket) ? " · median <b>" + pricing.medianDaysOnMarket + "</b> days on market" : "");
+  }
+  lastPricing = pricing;
+  renderDealMath();
+  syncSelAll();
+}
+
 function render(result, spec) {
   $("loading").hidden = true;
   $("err").hidden = true;
@@ -222,7 +320,7 @@ function render(result, spec) {
     return;
   }
 
-  const { comps, pricing, counts, widenNotes = [], pricingExactBased, usedRadius } = result;
+  const { comps, counts, widenNotes = [], usedRadius } = result;
 
   if (!comps.length) {
     $("results").hidden = true;
@@ -240,33 +338,32 @@ function render(result, spec) {
   $("empty").hidden = true;
   $("results").hidden = false;
 
-  // Summary cards
-  $("summary").innerHTML =
-    card("Market value (IMV)", fmt$(pricing.subjectImv), "CarGurus avg for this car") +
-    card("List for “Good Deal”", fmt$(pricing.goodDealPrice), "≤ this shows Good", "good") +
-    card("List for “Great Deal”", fmt$(pricing.greatDealPrice), "≤ this shows Great", "great");
+  // Key each comp and pick the default selection. Mirror the server's pricing
+  // basis: with >=3 exact comps, start with only the exact ones checked (widened
+  // rows unchecked) so the headline value isn't skewed by other trims.
+  currentComps = comps.map((c, i) => Object.assign(c, { _key: "i" + i }));
+  currentSpec = spec;
+  const exactCount = currentComps.filter((c) => c.exact).length;
+  const initialSel = exactCount >= 3 ? currentComps.filter((c) => c.exact) : currentComps;
+  selectedKeys = new Set(initialSel.map((c) => c._key));
 
-  // Match line
-  const rc = pricing.ratingCounts || {};
-  const rcStr = Object.entries(rc).map(([k, v]) => v + " " + k).join(" · ");
+  // Match line (describes the found set; live pricing details live in #selnote)
   const widened = comps.length - counts.exact;
   $("matchline").innerHTML =
-    "<b>" + comps.length + "</b> comps — <b>" + counts.exact + "</b> exact" +
+    "<b>" + comps.length + "</b> comps found — <b>" + counts.exact + "</b> exact" +
     (widened > 0 ? " + <b>" + widened + "</b> widened (" + esc(widenNotes.join(", ")) + ")" : "") +
-    " · asking <b>" + fmt$(pricing.lowAsking) + "</b>–<b>" + fmt$(pricing.highAsking) + "</b>" +
-    " · median <b>" + fmt$(pricing.medianAsking) + "</b>" +
-    (Number.isFinite(pricing.medianDaysOnMarket) ? " · median <b>" + pricing.medianDaysOnMarket + " days</b> on market" : "") +
-    (pricingExactBased ? "" : "<br><i>Pricing based on all shown comps (few exact matches).</i>") +
-    (rcStr ? "<br>" + rcStr : "");
+    "<br><span class='hint'>Tip: uncheck any row (e.g. a higher trim) to drop it from the pricing above.</span>";
 
   // Table
   const tb = $("compTable").querySelector("tbody");
   tb.innerHTML = "";
-  for (const c of comps) {
+  for (const c of currentComps) {
+    const checked = selectedKeys.has(c._key);
     const tr = document.createElement("tr");
-    if (!c.exact) tr.className = "widened";
+    tr.className = (c.exact ? "" : "widened") + (checked ? "" : " excluded");
     const tag = c.exact ? "" : " <span class='wtag' title='Widened to reach 10 comps'>≈</span>";
     tr.innerHTML =
+      "<td class='use'><input type='checkbox' class='rowsel' data-key='" + c._key + "'" + (checked ? " checked" : "") + " aria-label='Include this comp in pricing' /></td>" +
       "<td>" + c.year + tag + " " + esc(c.model) + "<div class='trim'>" + esc(c.trim || "—") + "</div></td>" +
       "<td class='num'>" + fmtN(c.mileage) + "</td>" +
       "<td class='num'>" + fmt$(c.price) + "</td>" +
@@ -278,12 +375,35 @@ function render(result, spec) {
     tb.appendChild(tr);
   }
 
+  // Wire per-row checkboxes + the header select-all.
+  tb.querySelectorAll(".rowsel").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const key = cb.getAttribute("data-key");
+      if (cb.checked) selectedKeys.add(key); else selectedKeys.delete(key);
+      const tr = cb.closest("tr");
+      if (tr) tr.classList.toggle("excluded", !cb.checked);
+      applySelection();
+    });
+  });
+  const selAll = $("selAll");
+  if (selAll) {
+    selAll.onchange = () => {
+      const on = selAll.checked;
+      selectedKeys = new Set(on ? currentComps.map((c) => c._key) : []);
+      tb.querySelectorAll(".rowsel").forEach((cb) => {
+        cb.checked = on;
+        const tr = cb.closest("tr");
+        if (tr) tr.classList.toggle("excluded", !on);
+      });
+      applySelection();
+    };
+  }
+
   // Competition / market supply line
   renderMarket(result);
 
-  // Deal math (recomputes live from lastPricing)
-  lastPricing = pricing;
-  renderDealMath();
+  // Summary cards + deal math, computed from the current selection.
+  applySelection();
 }
 
 function renderMarket(result) {
