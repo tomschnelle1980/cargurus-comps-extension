@@ -33,9 +33,10 @@ async function cycleTheme() {
   await chrome.storage.local.set({ settings });
 }
 
-// Holds the most recent search pricing so Deal math can recompute live as the
-// manager edits recon / fees without re-running the search.
-let lastPricing = null;
+// Pricing from the currently-selected comps; deal math recomputes live from it.
+let currentPricing = null;
+// Inventory Plus market data (TrueScore Market + TrueTarget) read off the page.
+let subjectExtra = null;
 
 // Cached settings so the "Read this tab" button can re-read on demand. The panel
 // stays open across tab switches, so this lets you pull a fresh vehicle without
@@ -51,7 +52,8 @@ function readSubjectVehicle(selectors) {
   const txt = (el) => (el && (el.value || el.textContent) || "").trim();
   const bySel = (sel) => { try { return sel ? txt(document.querySelector(sel)) : ""; } catch (e) { return ""; } };
 
-  const out = { year: "", make: "", model: "", trim: "", mileage: "", bodyStyle: "", source: "none", candidates: [] };
+  const out = { year: "", make: "", model: "", trim: "", mileage: "", bodyStyle: "",
+                target: "", turn: "", volume: "", market: "", source: "none", candidates: [] };
 
   // Body style from a piece of text (convertible=cabriolet=roadster, etc.).
   const detectBody = (s) => {
@@ -148,6 +150,35 @@ function readSubjectVehicle(selectors) {
   // (e.g. sedans/coupes when appraising a convertible).
   out.bodyStyle = detectBody(hit);
 
+  // 5) Inventory Plus market widgets. Class names are auto-generated (React/MUI),
+  // so key off stable ids (#trueScoreMarket-container, #mainScoreLbl, #retail)
+  // and the stat label text ("Turn", "Volume/Mo.").
+  try {
+    let tsRoot = document.querySelector("#trueScoreMarket-container");
+    if (!tsRoot) {
+      const h = Array.from(document.querySelectorAll("h6")).find((n) => /truescore market/i.test(n.textContent || ""));
+      tsRoot = h ? h.parentElement : null;
+    }
+    if (tsRoot) {
+      tsRoot.querySelectorAll("p").forEach((pn) => {
+        const lab = (pn.textContent || "").trim().toLowerCase();
+        const h6 = pn.parentElement && pn.parentElement.querySelector("h6");
+        const val = h6 ? (h6.textContent || "").trim() : "";
+        if (/turn/.test(lab)) out.turn = val;
+        else if (/volume/.test(lab)) out.volume = val;
+      });
+      const scoreLbl = document.getElementById("mainScoreLbl");
+      if (scoreLbl && scoreLbl.parentElement) {
+        const mh = scoreLbl.parentElement.querySelector("h6");
+        if (mh) out.market = (mh.textContent || "").trim();
+      }
+    }
+  } catch (e) { /* ignore */ }
+  try {
+    const tgt = document.querySelector("#retail .value") || document.querySelector("#truemarket .value");
+    if (tgt) { const c = tgt.cloneNode(true); c.querySelectorAll(".subtitle").forEach((s) => s.remove()); out.target = (c.textContent || "").trim(); }
+  } catch (e) { /* ignore */ }
+
   return out;
 }
 
@@ -223,12 +254,25 @@ async function readActiveTab(settings, opts = {}) {
       status.className = "pill";
       return;
     }
-    const [res] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+    // Read every frame (the vehicle heading and the Inventory Plus widgets may
+    // live in different frames), then merge: first non-empty value per field.
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
       func: readSubjectVehicle,
       args: [settings.selectors || {}]
     });
-    const v = (res && res.result) || {};
+    const v = { year: "", make: "", model: "", trim: "", mileage: "", bodyStyle: "",
+                target: "", turn: "", volume: "", market: "", source: "none" };
+    for (const r of (results || [])) {
+      const o = r && r.result;
+      if (!o) continue;
+      ["year", "make", "model", "trim", "mileage", "bodyStyle", "target", "turn", "volume", "market"].forEach((k) => {
+        if (!v[k] && o[k]) v[k] = o[k];
+      });
+      if (v.source === "none" && o.source && o.source !== "none") v.source = o.source;
+    }
+    subjectExtra = { target: v.target, turn: v.turn, volume: v.volume, market: v.market };
+
     if (v.year) $("year").value = v.year;
     if (v.make) $("make").value = v.make;
     if (v.model) $("model").value = v.model;
@@ -344,36 +388,59 @@ function syncSelAll() {
   selAll.indeterminate = n > 0 && n < total;
 }
 
-// Recompute the headline value + deal math from the checked comps only.
-function applySelection() {
+// Recompute pricing + chips + deal math from the checked comps. resetAcv=true
+// on a fresh search seeds ACV to the Good-Deal buy; false keeps the user's ACV.
+function applySelection(resetAcv) {
   const sel = selectedComps();
+  syncSelAll();
   const note = $("selnote");
   if (!sel.length) {
-    $("summary").innerHTML =
-      card("Market value (IMV)", "—", "select comps below") +
-      card("List for “Good Deal”", "—", "≤ this shows Good", "good") +
-      card("List for “Great Deal”", "—", "≤ this shows Great", "great");
-    if (note) note.innerHTML = "<b>No comps selected.</b> Check at least one row below to price this car.";
-    lastPricing = null;
+    currentPricing = null;
+    renderChips(null);
+    if (note) note.innerHTML = "<b>No comps selected.</b> Check at least one row to price this car.";
     renderDealMath();
-    syncSelAll();
     return;
   }
-  const pricing = computePricingLocal(sel);
-  $("summary").innerHTML =
-    card("Market value (IMV)", fmt$(pricing.subjectImv), "CarGurus avg for this car") +
-    card("List for “Good Deal”", fmt$(pricing.goodDealPrice), "≤ this shows Good", "good") +
-    card("List for “Great Deal”", fmt$(pricing.greatDealPrice), "≤ this shows Great", "great");
-  if (note) {
-    note.innerHTML =
-      "Pricing from <b>" + sel.length + "</b> of <b>" + currentComps.length + "</b> comps" +
-      " · asking <b>" + fmt$(pricing.lowAsking) + "</b>–<b>" + fmt$(pricing.highAsking) + "</b>" +
-      " · median <b>" + fmt$(pricing.medianAsking) + "</b>" +
-      (Number.isFinite(pricing.medianDaysOnMarket) ? " · median <b>" + pricing.medianDaysOnMarket + "</b> days on market" : "");
+  currentPricing = computePricingLocal(sel);
+  renderChips(currentPricing);
+  if (note) note.innerHTML = "Pricing from <b>" + sel.length + "</b> of <b>" + currentComps.length + "</b> selected comps.";
+  if (resetAcv && Number.isFinite(currentPricing.goodDealPrice)) {
+    const costs = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value) + num($("targetGross").value);
+    $("acv").value = Math.max(0, Math.round(currentPricing.goodDealPrice - costs)).toLocaleString("en-US");
   }
-  lastPricing = pricing;
   renderDealMath();
-  syncSelAll();
+}
+
+// Top summary chips (Market IMV, comp asking range, median ask, AVG DOL).
+function renderChips(p) {
+  const el = $("chips");
+  if (!el) return;
+  if (!p || !Number.isFinite(p.subjectImv)) { el.innerHTML = ""; return; }
+  const dol = Number.isFinite(p.medianDaysOnMarket) ? String(p.medianDaysOnMarket) : "—";
+  el.innerHTML =
+    "<span class='chip' title='CarGurus market value'>Market (IMV) <b>" + fmt$(p.subjectImv) + "</b></span>" +
+    "<span class='chip'>Comps asking <b>" + fmt$(p.lowAsking) + "–" + fmt$(p.highAsking) + "</b></span>" +
+    "<span class='chip' title='Median comp asking price'>Median ask <b>" + fmt$(p.medianAsking) + "</b></span>" +
+    "<span class='chip' title='Average Days On Lot'>AVG DOL <b>" + dol + "</b></span>";
+}
+
+// Inventory Plus market panel (target price, sold/mo, days-to-turn).
+function renderIpx() {
+  const el = $("ipx");
+  if (!el) return;
+  const x = subjectExtra || {};
+  if (!(x.target || x.turn || x.volume)) { el.hidden = true; return; }
+  el.hidden = false;
+  const tgt = (x.target && !/^\s*(n\/?a|—|-)\s*$/i.test(x.target)) ? x.target : null;
+  const mkt = x.market ? " <span class='src'>· " + esc(x.market) + "</span>" : "";
+  el.innerHTML =
+    "<div class='ipx-h'>From Inventory Plus" + mkt + "</div>" +
+    "<div class='ipx-grid'>" +
+      "<div class='ipx-stat'><div class='ipx-v" + (tgt ? "" : " empty") + "'>" + (tgt ? esc(tgt) : "—") + "</div>" +
+        "<div class='ipx-k'>Inventory+ Target" + (tgt ? "" : "<span>not set · rare car</span>") + "</div></div>" +
+      "<div class='ipx-stat'><div class='ipx-v'>" + esc(x.volume || "—") + "<span class='u'>/mo</span></div><div class='ipx-k'>Sold in market</div></div>" +
+      "<div class='ipx-stat'><div class='ipx-v'>" + esc(x.turn || "—") + "<span class='u'> days</span></div><div class='ipx-k'>Avg to turn</div></div>" +
+    "</div>";
 }
 
 function render(result, spec) {
@@ -451,7 +518,7 @@ function render(result, spec) {
       if (cb.checked) selectedKeys.add(key); else selectedKeys.delete(key);
       const tr = cb.closest("tr");
       if (tr) tr.classList.toggle("excluded", !cb.checked);
-      applySelection();
+      applySelection(false);
     });
   });
   const selAll = $("selAll");
@@ -464,15 +531,17 @@ function render(result, spec) {
         const tr = cb.closest("tr");
         if (tr) tr.classList.toggle("excluded", !on);
       });
-      applySelection();
+      applySelection(false);
     };
   }
 
   // Competition / market supply line
   renderMarket(result);
+  // Inventory Plus market panel (from the page read)
+  renderIpx();
 
-  // Summary cards + deal math, computed from the current selection.
-  applySelection();
+  // Chips + deal math from the current selection; seed ACV to the Good-Deal buy.
+  applySelection(true);
 }
 
 function renderMarket(result) {
@@ -488,10 +557,12 @@ function renderMarket(result) {
     (buckets.length ? "<br><span class='buckets'>" + buckets.map((b) => b.mi + " mi: <b>" + b.count + "</b>").join(" · ") + "</span>" : "");
 }
 
+const acvVal = () => num($("acv").value);
+
+// The ACV build-up: from the ACV you type, add costs + gross to get the retail
+// price, classify its estimated CarGurus tier, and draw the ladder / bar / receipt.
 function renderDealMath() {
-  const el = $("maxbuy");
-  // Remind the user to set store fees (they are $0 until entered, which changes
-  // the max buy). The fields no longer show placeholder numbers.
+  // Remind the user to set store fees (they are $0 until entered).
   const warn = $("feeWarn");
   if (warn) {
     const missing = [];
@@ -501,55 +572,76 @@ function renderDealMath() {
       warn.textContent = "⚠ Your " + missing.join(" and ") + " " + (missing.length > 1 ? "are" : "is") +
         " blank ($0). Set " + (missing.length > 1 ? "them" : "it") + " here or in Settings — saved once, they stick.";
       warn.hidden = false;
-    } else {
-      warn.hidden = true;
-    }
+    } else { warn.hidden = true; }
   }
-  if (!lastPricing) { el.innerHTML = ""; return; }
-  const recon = num($("recon").value);
-  const dealerFee = num($("dealerFee").value);
-  const titleFee = num($("titleFee").value);
-  const targetGross = num($("targetGross").value);
 
-  const scenarios = [
-    { label: "Great Deal", price: lastPricing.greatDealPrice, cls: "great" },
-    { label: "Good Deal", price: lastPricing.goodDealPrice, cls: "good rec" },
-    { label: "Market (IMV)", price: lastPricing.subjectImv, cls: "" }
-  ];
-
-  let rows = "";
-  for (const s of scenarios) {
-    // Dealer fee is a cost the sale price must recover (subtracted), same as
-    // recon and title. Max buy = List − Dealer fee − Recon − Title fee − Gross.
-    const maxBuy = Number.isFinite(s.price) ? s.price - dealerFee - recon - titleFee - targetGross : null;
-    rows +=
-      "<tr class='" + s.cls + "'>" +
-      "<td>" + esc(s.label) + (s.cls.includes("rec") ? " <span class='rectag'>recommended</span>" : "") + "</td>" +
-      "<td class='num'>" + fmt$(s.price) + "</td>" +
-      "<td class='num big'>" + fmt$(maxBuy) + "</td>" +
-      "</tr>";
+  const badge = $("tier"), saleOut = $("saleOut");
+  const p = currentPricing;
+  if (!p || !Number.isFinite(p.subjectImv)) {
+    if (badge) { badge.textContent = "—"; badge.style.removeProperty("--tc"); }
+    if (saleOut) saleOut.textContent = "—";
+    $("buildBar").innerHTML = ""; $("receipt").innerHTML = "";
+    $("ladderBar").innerHTML = ""; $("markerVal").textContent = "—";
+    $("tickLo").textContent = ""; $("tickHi").textContent = "";
+    return;
   }
-  el.innerHTML =
-    "<table class='dmtable'><thead><tr><th>List it as</th><th class='num'>List price</th>" +
-    "<th class='num'>Max buy for " + fmt$(targetGross) + " gross</th></tr></thead><tbody>" + rows + "</tbody></table>";
 
-  renderTopBuy(recon, dealerFee, titleFee, targetGross);
-}
+  const recon = num($("recon").value), dealer = num($("dealerFee").value),
+        title = num($("titleFee").value), gross = num($("targetGross").value);
+  const acv = acvVal();
+  const sale = acv + recon + title + dealer + gross;
 
-// Prominent headline number: the max buy at the recommended (Good Deal) list price.
-function renderTopBuy(recon, dealerFee, titleFee, targetGross) {
-  const el = $("topbuy");
-  if (!lastPricing) { el.hidden = true; return; }
-  const usingGood = Number.isFinite(lastPricing.goodDealPrice);
-  const listPrice = usingGood ? lastPricing.goodDealPrice : lastPricing.subjectImv;
-  if (!Number.isFinite(listPrice)) { el.hidden = true; return; }
-  const maxBuy = listPrice - dealerFee - recon - titleFee - targetGross;
-  el.hidden = false;
-  el.innerHTML =
-    "<div class='tb-k'>Max buy to clear " + esc(fmt$(targetGross)) + " gross</div>" +
-    "<div class='tb-v'>" + esc(fmt$(maxBuy)) + "</div>" +
-    "<div class='tb-sub'>listing at the " + (usingGood ? "Good Deal" : "market") + " price of " +
-    esc(fmt$(listPrice)) + (recon ? " · recon " + esc(fmt$(recon)) : " · set recon below") + "</div>";
+  const imv = p.subjectImv;
+  const greatCeil = Number.isFinite(p.greatDealPrice) ? p.greatDealPrice : Math.round(imv * 0.94);
+  const goodCeil = Number.isFinite(p.goodDealPrice) ? p.goodDealPrice : Math.round(imv * 0.98);
+  const fairCeil = Math.round(imv * 1.05), highCeil = Math.round(imv * 1.10);
+  const LMIN = Math.round(imv * 0.80), LMAX = Math.round(imv * 1.15);
+  const span = Math.max(1, LMAX - LMIN);
+
+  // estimated tier of the resulting retail price
+  const tier = sale <= greatCeil ? "great" : sale <= goodCeil ? "good" :
+               sale <= fairCeil ? "fair" : sale <= highCeil ? "high" : "over";
+  const TIER = { great: ["Great Deal", "var(--great)"], good: ["Good Deal", "var(--good)"],
+                 fair: ["Fair Deal", "var(--fair)"], high: ["High Priced", "var(--high)"],
+                 over: ["Overpriced", "var(--over)"] };
+  badge.textContent = TIER[tier][0];
+  badge.style.setProperty("--tc", TIER[tier][1]);
+  saleOut.textContent = fmt$(sale);
+
+  // price ladder
+  const segs = [["Great", LMIN, greatCeil, "var(--great)"], ["Good", greatCeil, goodCeil, "var(--good)"],
+                ["Fair", goodCeil, fairCeil, "var(--fair)"], ["High", fairCeil, highCeil, "var(--high)"],
+                ["Over", highCeil, LMAX, "var(--over)"]];
+  $("ladderBar").innerHTML = segs.map(([lab, lo, hi, col]) => {
+    const w = Math.max(0, (hi - lo) / span * 100);
+    return "<div class='seg' style='width:" + w + "%;background:" + col + "'>" + (w > 9 ? lab : "") + "</div>";
+  }).join("");
+  $("tickLo").textContent = fmt$(LMIN); $("tickHi").textContent = fmt$(LMAX);
+  const pct = Math.max(0, Math.min(100, (sale - LMIN) / span * 100));
+  $("marker").style.left = pct + "%"; $("markerVal").textContent = fmt$(sale);
+
+  // build-up bar (proportions of the retail price)
+  const denom = sale > 0 ? sale : 1;
+  const parts = [["var(--acv)", acv, "ACV"], ["#c07f2e", recon, "Recon"], ["#9a6b3a", title, "Title"],
+                 ["#7a684a", dealer, "Fee"], ["var(--profit)", gross, "Profit"]];
+  $("buildBar").innerHTML = parts.map(([col, v, lab]) => {
+    const w = Math.max(0, v) / denom * 100;
+    return "<span style='width:" + w + "%;background:" + col + "'>" + (w > 11 ? fmt$(v) : (w > 6 ? lab : "")) + "</span>";
+  }).join("");
+
+  // receipt
+  $("receipt").innerHTML =
+    "<div class='dm-row acv'><div class='k'><span class='dot' style='background:var(--acv)'></span>ACV <small>into the car</small></div><div class='v'>" + fmt$(acv) + "</div></div>" +
+    "<div class='dm-row cost'><div class='k'><span class='dot' style='background:#c07f2e'></span>Reconditioning</div><div class='v'><span class='plus'>+</span>" + fmt$(recon) + "</div></div>" +
+    "<div class='dm-row cost'><div class='k'><span class='dot' style='background:#9a6b3a'></span>Title fee</div><div class='v'><span class='plus'>+</span>" + fmt$(title) + "</div></div>" +
+    "<div class='dm-row cost'><div class='k'><span class='dot' style='background:#7a684a'></span>Dealer / doc fee</div><div class='v'><span class='plus'>+</span>" + fmt$(dealer) + "</div></div>" +
+    "<div class='dm-row profit'><div class='k'><span class='dot' style='background:var(--profit)'></span>Front-end gross <small>profit</small></div><div class='v'><span class='plus'>+</span>" + fmt$(gross) + "</div></div>" +
+    "<div class='dm-row total'><div class='k'>Retail sale price</div><div class='v'>" + fmt$(sale) + "</div></div>";
+
+  // quick-jump button sublabels
+  if ($("qGreat")) $("qGreat").textContent = "list " + fmt$(greatCeil);
+  if ($("qGood")) $("qGood").textContent = "list " + fmt$(goodCeil);
+  if ($("qMarket")) $("qMarket").textContent = "list " + fmt$(imv);
 }
 
 function num(v) { const n = parseInt(String(v).replace(/[^\d-]/g, ""), 10); return Number.isFinite(n) ? n : 0; }
@@ -756,6 +848,20 @@ async function persistDealDefaults() {
   $("readBtn").addEventListener("click", () => readActiveTab(currentSettings || DEFAULTS, { manual: true }));
   // Editing the subject mileage recenters the range window (±15k default).
   $("mileage").addEventListener("change", () => centerMileageWindow($("mileage").value));
+
+  // Deal-math build-up: ACV is editable; quick buttons jump ACV to a rating.
+  $("acv").addEventListener("input", renderDealMath);
+  $("acv").addEventListener("blur", () => { $("acv").value = acvVal().toLocaleString("en-US"); });
+  $("quick").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b || !currentPricing) return;
+    const map = { great: currentPricing.greatDealPrice, good: currentPricing.goodDealPrice, market: currentPricing.subjectImv };
+    const target = map[b.dataset.k];
+    if (!Number.isFinite(target)) return;
+    const costs = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value) + num($("targetGross").value);
+    $("acv").value = Math.max(0, Math.round(target - costs)).toLocaleString("en-US");
+    renderDealMath();
+  });
 
   // Deal math recomputes live; fee/title/target are saved as store defaults.
   ["recon", "dealerFee", "titleFee", "targetGross"].forEach((id) => {

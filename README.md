@@ -52,22 +52,28 @@ deal rating, mileage, distance, dealer, VIN, and stock number.
      to hit those ratings, derived from the live comp set.
    - The table lists matching comps with price, IMV, rating, **days on market**,
      distance, and dealer.
-   - **Deal math** — enter recon (per car) and it backs into the **max purchase
-     price** to hit your target gross, for each price scenario (Great / Good /
-     Market). Dealer fee, title fee, and target gross are saved store defaults.
+   - **Deal math (ACV build-up)** — type the **ACV** (what you're into the car
+     for) and it builds up to the retail price and shows its **estimated CarGurus
+     rating**, on a Great→Good→Fair→High→Over price ladder. Edit ACV or gross and
+     the rating re-rates live; or click a rating to jump ACV to that list price.
+   - **From Inventory Plus** — reads the store's own market numbers off the page:
+     the **Target price** (TrueTarget), **units sold/mo** and **days-to-turn**
+     (TrueScore Market).
    - **Competition** — how many comparable units are for sale within your radius,
      plus a distance breakdown (25 mi: 12 · 50 mi: 24 …) and how far the search
      had to expand to reach 10 comps.
 
 ### Deal math formula
 
-`Max buy = List price − Dealer fee − Recon − Title fee − Target gross`
+`Retail sale price = ACV + Recon + Title fee + Dealer fee + Front-end gross`
 
-The dealer/doc fee, title fee, and recon are all treated as costs the sale price
-must recover, so each is subtracted from the max purchase price. Dealer fee and
-title fee are **blank by default** — set them once (in the popup or Settings) and
-they're saved as store defaults. If your accounting treats title as a
-pass-through, just leave the Title fee at 0.
+ACV is the headline (the most to put in the car); recon, title, dealer fee, and
+your gross stack on top to the retail price. The estimated rating classifies that
+retail price against the comp set: **Great** and **Good** cutoffs come from the
+comps' own ratings; **Fair / High / Over** are modeled bands (≈ market, +5%,
++10%), so the whole rating is labeled *estimated* — not an official CarGurus call.
+Dealer fee and title fee are **blank by default** — set them once (in the popup or
+Settings) and they're saved as store defaults.
 
 ### How it reaches ~10 comps
 
