@@ -6,7 +6,7 @@ const fmt$ = (n) => (Number.isFinite(n) ? "$" + Math.round(n).toLocaleString("en
 const fmtN = (n) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "—");
 
 const DEFAULTS = {
-  zip: "", radius: "100", variance: 10000, strictTrim: true, selectors: {},
+  zip: "", radius: "100", variance: 10000, strictTrim: true, includeDelivery: true, selectors: {},
   dealerFee: "", titleFee: "", targetGross: 2500, reconDefault: 2500, theme: "auto"
 };
 
@@ -155,6 +155,7 @@ async function loadDefaults() {
   $("radius").value = s.radius || "100";
   $("variance").value = Number.isFinite(s.variance) ? s.variance : 10000;
   $("strictTrim").checked = s.strictTrim !== false;
+  $("includeDelivery").checked = s.includeDelivery !== false;
   if (s.dealerFee !== "" && s.dealerFee != null) $("dealerFee").value = s.dealerFee;
   if (s.titleFee !== "" && s.titleFee != null) $("titleFee").value = s.titleFee;
   $("targetGross").value = Number.isFinite(s.targetGross) ? s.targetGross : 2500;
@@ -212,6 +213,7 @@ function gatherSpec() {
     model: $("model").value.trim(),
     trim: $("strictTrim").checked ? $("trim").value.trim() : "",
     bodyStyle: $("bodyStyle").value || "any",
+    includeDelivery: $("includeDelivery").checked,
     mileage: parseInt($("mileage").value.replace(/[^\d]/g, ""), 10) || null,
     zip: $("zip").value.replace(/[^\d]/g, ""),
     radius: parseInt($("radius").value, 10) || 100,
@@ -616,7 +618,8 @@ async function findComps() {
   // persist settings
   await chrome.storage.local.set({
     settings: Object.assign((await chrome.storage.local.get("settings")).settings || {}, {
-      zip: spec.zip, radius: String(spec.radius), variance: spec.mileageVariance, strictTrim: $("strictTrim").checked
+      zip: spec.zip, radius: String(spec.radius), variance: spec.mileageVariance,
+      strictTrim: $("strictTrim").checked, includeDelivery: $("includeDelivery").checked
     })
   });
 

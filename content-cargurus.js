@@ -84,7 +84,7 @@
     return null;
   }
 
-  // q = { zip, radius, startYear, endYear, minMileage, maxMileage }
+  // q = { zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }
   async function fetchListingsPage(entity, q, offset) {
     const params = new URLSearchParams({
       "entitySelectingHelper.selectedEntity": entity,
@@ -99,6 +99,9 @@
     if (q.endYear) params.set("endYear", String(q.endYear));
     if (Number.isFinite(q.minMileage)) params.set("minMileage", String(Math.max(0, q.minMileage)));
     if (Number.isFinite(q.maxMileage)) params.set("maxMileage", String(q.maxMileage));
+    // Match CarGurus' own toggle: include nationwide-delivery listings (cars
+    // beyond the radius that ship to the area) so counts line up with the site.
+    params.set("isDeliveryEnabled", q.includeDelivery === false ? "false" : "true");
 
     // Hard timeout on the network call itself. A CarGurus bot-check page can hold
     // the connection open indefinitely; without this the whole search hangs.
@@ -317,20 +320,22 @@
     // sedans/coupes. Comps whose body style we can't identify are kept (unknown
     // != mismatch), so we only drop a comp we can positively tell is different.
     const wantBody = spec.bodyStyle && spec.bodyStyle !== "any" ? String(spec.bodyStyle).toLowerCase() : null;
+    const includeDelivery = spec.includeDelivery !== false;
 
     let pool = [];
     let usedRadius = spec.radius;
     let rawFetched = 0;
     for (const radius of radii) {
       usedRadius = radius;
-      const raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage });
+      const raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery });
       rawFetched = raw.length;
       pool = raw
         .map(shapeComp)
         .filter((c) => modelMatches(spec.model, c.model))
         .filter((c) => !wantBody || !c.body || c.body === wantBody)
-        // Drop nationwide-delivery listings that sit outside the searched radius.
-        .filter((c) => !Number.isFinite(c.distance) || c.distance <= radius);
+        // When delivery listings are included, keep cars beyond the radius (they
+        // ship to the area), matching CarGurus. Otherwise cap at the radius.
+        .filter((c) => includeDelivery || !Number.isFinite(c.distance) || c.distance <= radius);
       if (pool.length >= target) break;
     }
 
