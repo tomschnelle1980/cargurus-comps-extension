@@ -30,6 +30,10 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+/* Make the `hidden` attribute always win. Elements like .loading set
+   `display: flex`, which otherwise overrides the browser's [hidden] rule and
+   leaves the spinner stuck on screen even when hidden=true. */
+[hidden] { display: none !important; }
 body {
   /* Rendered in the side panel: fill its width and full height. The panel is
      user-resizable, so stay fluid and cap the width only for very wide panels. */

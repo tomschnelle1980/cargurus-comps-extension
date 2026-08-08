@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CarGurus Comps for Inventory Plus",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Appraising a car in Inventory Plus? One click pulls matching CarGurus comps (same Y/M/M/trim, +/-mileage, within radius) with market value and Good/Great deal pricing.",
   "permissions": [
     "activeTab",
