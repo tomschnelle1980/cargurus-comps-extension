@@ -300,16 +300,29 @@
     }
 
     const target = Number.isFinite(spec.targetCount) ? spec.targetCount : 10;
-    const variance = Number.isFinite(spec.mileageVariance) ? spec.mileageVariance : 10000;
     const hasMiles = Number.isFinite(spec.mileage) && spec.mileage > 0;
     const Y = spec.year || null;
 
-    // Broad fetch window so we can tighten/loosen client-side without refetching.
-    // Years: subject +/- 2. Mileage: subject +/- 2x the variance.
+    // Mileage window comes from the range slider (explicit min/max). Fall back to
+    // a symmetric ±15k around the subject if not supplied.
+    let winMin = Number.isFinite(spec.minMileage) ? spec.minMileage : null;
+    let winMax = Number.isFinite(spec.maxMileage) ? spec.maxMileage : null;
+    if ((winMin == null || winMax == null) && hasMiles) {
+      const V = Number.isFinite(spec.mileageVariance) ? spec.mileageVariance : 15000;
+      winMin = Math.max(0, spec.mileage - V);
+      winMax = spec.mileage + V;
+    }
+    // A full-range slider (0 .. very high) means "no mileage constraint".
+    const hasWindow = Number.isFinite(winMin) && Number.isFinite(winMax) &&
+      winMax > winMin && !(winMin <= 0 && winMax >= 200000);
+
+    // Broad fetch window so "wider mileage" widening has candidates beyond the
+    // user's window (half a window on each side). Years: subject +/- 2.
     const startYear = Y ? Y - 2 : null;
     const endYear = Y ? Y + 2 : null;
-    const minMileage = hasMiles ? Math.max(0, spec.mileage - variance * 2) : null;
-    const maxMileage = hasMiles ? spec.mileage + variance * 2 : null;
+    const halfW = hasWindow ? Math.max(2500, Math.round((winMax - winMin) / 2)) : null;
+    const minMileage = hasWindow ? Math.max(0, winMin - halfW) : null;
+    const maxMileage = hasWindow ? winMax + halfW : null;
 
     // Radius ladder: start at the requested radius, widen only if we come up short.
     const ladder = [spec.radius, 100, 150, 200, 300, 500]
@@ -345,10 +358,11 @@
       const yearDiff = Y && Number.isFinite(c.year) ? Math.abs(c.year - Y) : 0;
       const mileDiff = hasMiles && Number.isFinite(c.mileage) ? Math.abs(c.mileage - spec.mileage) : 0;
       const trimOk = trimMatches(spec.trim, c.trim, spec.model);
+      const inWindow = !hasWindow || (Number.isFinite(c.mileage) && c.mileage >= winMin && c.mileage <= winMax);
       const exact =
         (!Y || c.year === Y) &&
         (!spec.trim || trimOk) &&
-        (!hasMiles || (Number.isFinite(c.mileage) && mileDiff <= variance)) &&
+        inWindow &&
         (!Number.isFinite(c.distance) || c.distance <= spec.radius);
       return Object.assign(c, { yearDiff, mileDiff, trimMatched: trimOk, exact });
     });
@@ -375,7 +389,7 @@
       widenNotes.push("±" + maxY + " model year" + (maxY > 1 ? "s" : ""));
     }
     if (spec.trim && comps.some((c) => !c.trimMatched)) widenNotes.push("other trims");
-    if (hasMiles && comps.some((c) => c.mileDiff > variance)) widenNotes.push("wider mileage");
+    if (hasWindow && comps.some((c) => Number.isFinite(c.mileage) && (c.mileage < winMin || c.mileage > winMax))) widenNotes.push("wider mileage");
     if (usedRadius > spec.radius) widenNotes.push(usedRadius + " mi radius");
 
     // Competition / market supply: the true comparable set (same model, and same

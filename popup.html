@@ -47,7 +47,6 @@
           <option value="500">500</option>
         </select>
       </label>
-      <label>Mileage +/-<input id="variance" type="number" inputmode="numeric" value="10000" /></label>
       <label>Body style
         <select id="bodyStyle">
           <option value="any">Any</option>
@@ -67,6 +66,19 @@
       <label class="chk">
         <input id="includeDelivery" type="checkbox" checked /> Include delivery listings
       </label>
+    </div>
+
+    <div class="mileage-range">
+      <div class="mr-head">
+        <span>Mileage range</span>
+        <span id="mrLabel" class="mr-val">Any mileage</span>
+      </div>
+      <div class="mr-slider">
+        <div class="mr-track"></div>
+        <div class="mr-fill" id="mrFill"></div>
+        <input type="range" id="mileMin" min="0" max="200000" step="5000" value="0" aria-label="Minimum mileage" />
+        <input type="range" id="mileMax" min="0" max="200000" step="5000" value="200000" aria-label="Maximum mileage" />
+      </div>
     </div>
 
     <button id="findBtn" class="primary">Find comps</button>

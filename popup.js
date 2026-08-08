@@ -6,9 +6,14 @@ const fmt$ = (n) => (Number.isFinite(n) ? "$" + Math.round(n).toLocaleString("en
 const fmtN = (n) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "—");
 
 const DEFAULTS = {
-  zip: "", radius: "100", variance: 10000, strictTrim: true, includeDelivery: true, selectors: {},
+  zip: "", radius: "100", variance: 15000, strictTrim: true, includeDelivery: true, selectors: {},
   dealerFee: "", titleFee: "", targetGross: 2500, reconDefault: 2500, theme: "auto"
 };
+
+// Mileage range slider bounds + the default ± window centered on the subject.
+const MILE_MAX = 200000;
+let mileVariance = 15000;
+let mileUpdate = () => {};
 
 const THEMES = ["auto", "light", "dark"];
 const THEME_LABEL = { auto: "🌗 Auto", light: "☀️ Light", dark: "🌙 Dark" };
@@ -153,14 +158,52 @@ async function loadDefaults() {
   applyTheme(s.theme || "auto");
   if (s.zip) $("zip").value = s.zip;
   $("radius").value = s.radius || "100";
-  $("variance").value = Number.isFinite(s.variance) ? s.variance : 10000;
   $("strictTrim").checked = s.strictTrim !== false;
   $("includeDelivery").checked = s.includeDelivery !== false;
+  mileVariance = Number.isFinite(s.variance) ? s.variance : 15000;
   if (s.dealerFee !== "" && s.dealerFee != null) $("dealerFee").value = s.dealerFee;
   if (s.titleFee !== "" && s.titleFee != null) $("titleFee").value = s.titleFee;
   $("targetGross").value = Number.isFinite(s.targetGross) ? s.targetGross : 2500;
   $("recon").value = Number.isFinite(s.reconDefault) ? s.reconDefault : 2500;
   return s;
+}
+
+// Dual-handle mileage range slider: two overlaid range inputs kept from crossing,
+// with a fill bar between them and a live "X–Y mi" label.
+function setupMileageSlider() {
+  const lo = $("mileMin"), hi = $("mileMax"), fill = $("mrFill"), label = $("mrLabel");
+  if (!lo || !hi) return;
+  mileUpdate = () => {
+    let a = Number(lo.value), b = Number(hi.value);
+    if (a > b) { const t = a; a = b; b = t; }
+    const pctA = (a / MILE_MAX) * 100;
+    const pctB = (b / MILE_MAX) * 100;
+    if (fill) { fill.style.left = pctA + "%"; fill.style.width = Math.max(0, pctB - pctA) + "%"; }
+    if (label) {
+      label.textContent = (a <= 0 && b >= MILE_MAX)
+        ? "Any mileage"
+        : a.toLocaleString("en-US") + "–" + b.toLocaleString("en-US") + " mi";
+    }
+  };
+  lo.addEventListener("input", () => { if (Number(lo.value) > Number(hi.value)) lo.value = hi.value; mileUpdate(); });
+  hi.addEventListener("input", () => { if (Number(hi.value) < Number(lo.value)) hi.value = lo.value; mileUpdate(); });
+  mileUpdate();
+}
+
+// Recenter the window on the subject's mileage (±mileVariance, default 15k).
+function centerMileageWindow(subjectMiles) {
+  const lo = $("mileMin"), hi = $("mileMax");
+  if (!lo || !hi) return;
+  const V = Number.isFinite(mileVariance) ? mileVariance : 15000;
+  const m = parseInt(String(subjectMiles).replace(/[^\d]/g, ""), 10);
+  const snap = (x) => Math.round(x / 5000) * 5000;
+  if (Number.isFinite(m) && m > 0) {
+    lo.value = Math.max(0, snap(m - V));
+    hi.value = Math.min(MILE_MAX, snap(m + V));
+  } else {
+    lo.value = 0; hi.value = MILE_MAX;
+  }
+  mileUpdate();
 }
 
 async function readActiveTab(settings, opts = {}) {
@@ -192,6 +235,7 @@ async function readActiveTab(settings, opts = {}) {
     if (v.trim) $("trim").value = v.trim;
     if (v.mileage) $("mileage").value = v.mileage;
     $("bodyStyle").value = v.bodyStyle || "any";
+    centerMileageWindow($("mileage").value);
 
     if (v.source === "selectors" || v.source === "heuristic") {
       status.textContent = "Read from page ✓";
@@ -217,7 +261,8 @@ function gatherSpec() {
     mileage: parseInt($("mileage").value.replace(/[^\d]/g, ""), 10) || null,
     zip: $("zip").value.replace(/[^\d]/g, ""),
     radius: parseInt($("radius").value, 10) || 100,
-    mileageVariance: parseInt($("variance").value, 10) || 10000,
+    minMileage: parseInt($("mileMin").value, 10),
+    maxMileage: parseInt($("mileMax").value, 10),
     targetCount: 10
   };
 }
@@ -635,7 +680,7 @@ async function findComps() {
   // persist settings
   await chrome.storage.local.set({
     settings: Object.assign((await chrome.storage.local.get("settings")).settings || {}, {
-      zip: spec.zip, radius: String(spec.radius), variance: spec.mileageVariance,
+      zip: spec.zip, radius: String(spec.radius),
       strictTrim: $("strictTrim").checked, includeDelivery: $("includeDelivery").checked
     })
   });
@@ -702,12 +747,15 @@ async function persistDealDefaults() {
 
 (async function init() {
   currentSettings = await loadDefaults();
+  setupMileageSlider();
   await readActiveTab(currentSettings);
   $("findBtn").addEventListener("click", findComps);
   $("openOptions").addEventListener("click", () => chrome.runtime.openOptionsPage());
   $("themeBtn").addEventListener("click", cycleTheme);
   $("printBtn").addEventListener("click", printComps);
   $("readBtn").addEventListener("click", () => readActiveTab(currentSettings || DEFAULTS, { manual: true }));
+  // Editing the subject mileage recenters the range window (±15k default).
+  $("mileage").addEventListener("change", () => centerMileageWindow($("mileage").value));
 
   // Deal math recomputes live; fee/title/target are saved as store defaults.
   ["recon", "dealerFee", "titleFee", "targetGross"].forEach((id) => {
