@@ -61,11 +61,13 @@ deal rating, mileage, distance, dealer, VIN, and stock number.
 
 ### Deal math formula
 
-`Max buy = List price + Dealer fee − Recon − Title fee − Target gross`
+`Max buy = List price − Dealer fee − Recon − Title fee − Target gross`
 
-The dealer/doc fee is treated as income you collect (so it lets you pay a bit
-more); the title fee is treated as a cost. If your accounting treats title as a
-pass-through, just set the Title fee to 0.
+The dealer/doc fee, title fee, and recon are all treated as costs the sale price
+must recover, so each is subtracted from the max purchase price. Dealer fee and
+title fee are **blank by default** — set them once (in the popup or Settings) and
+they're saved as store defaults. If your accounting treats title as a
+pass-through, just leave the Title fee at 0.
 
 ### How it reaches ~10 comps
 

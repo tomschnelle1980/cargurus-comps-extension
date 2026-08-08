@@ -88,12 +88,13 @@
       <h3>Deal math — max buy for your target gross</h3>
       <div class="grid dm-inputs">
         <label>Recon $<input id="recon" type="number" inputmode="numeric" value="2500" /></label>
-        <label>Dealer fee $<input id="dealerFee" type="number" inputmode="numeric" placeholder="995" /></label>
-        <label>Title fee $<input id="titleFee" type="number" inputmode="numeric" placeholder="410" /></label>
+        <label>Dealer fee $<input id="dealerFee" type="number" inputmode="numeric" /></label>
+        <label>Title fee $<input id="titleFee" type="number" inputmode="numeric" /></label>
         <label>Target gross $<input id="targetGross" type="number" inputmode="numeric" value="2500" /></label>
       </div>
+      <p id="feeWarn" class="fee-warn" hidden></p>
       <div id="maxbuy" class="maxbuy"></div>
-      <p class="dm-formula">Max buy = List price + Dealer fee − Recon − Title fee − Target gross</p>
+      <p class="dm-formula">Max buy = List price − Dealer fee − Recon − Title fee − Target gross</p>
     </div>
 
     <div class="market" id="market"></div>

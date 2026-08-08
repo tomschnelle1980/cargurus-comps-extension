@@ -445,6 +445,21 @@ function renderMarket(result) {
 
 function renderDealMath() {
   const el = $("maxbuy");
+  // Remind the user to set store fees (they are $0 until entered, which changes
+  // the max buy). The fields no longer show placeholder numbers.
+  const warn = $("feeWarn");
+  if (warn) {
+    const missing = [];
+    if (!$("dealerFee").value.trim()) missing.push("dealer fee");
+    if (!$("titleFee").value.trim()) missing.push("title fee");
+    if (missing.length) {
+      warn.textContent = "⚠ Your " + missing.join(" and ") + " " + (missing.length > 1 ? "are" : "is") +
+        " blank ($0). Set " + (missing.length > 1 ? "them" : "it") + " here or in Settings — saved once, they stick.";
+      warn.hidden = false;
+    } else {
+      warn.hidden = true;
+    }
+  }
   if (!lastPricing) { el.innerHTML = ""; return; }
   const recon = num($("recon").value);
   const dealerFee = num($("dealerFee").value);
@@ -459,7 +474,9 @@ function renderDealMath() {
 
   let rows = "";
   for (const s of scenarios) {
-    const maxBuy = Number.isFinite(s.price) ? s.price + dealerFee - recon - titleFee - targetGross : null;
+    // Dealer fee is a cost the sale price must recover (subtracted), same as
+    // recon and title. Max buy = List − Dealer fee − Recon − Title fee − Gross.
+    const maxBuy = Number.isFinite(s.price) ? s.price - dealerFee - recon - titleFee - targetGross : null;
     rows +=
       "<tr class='" + s.cls + "'>" +
       "<td>" + esc(s.label) + (s.cls.includes("rec") ? " <span class='rectag'>recommended</span>" : "") + "</td>" +
@@ -481,7 +498,7 @@ function renderTopBuy(recon, dealerFee, titleFee, targetGross) {
   const usingGood = Number.isFinite(lastPricing.goodDealPrice);
   const listPrice = usingGood ? lastPricing.goodDealPrice : lastPricing.subjectImv;
   if (!Number.isFinite(listPrice)) { el.hidden = true; return; }
-  const maxBuy = listPrice + dealerFee - recon - titleFee - targetGross;
+  const maxBuy = listPrice - dealerFee - recon - titleFee - targetGross;
   el.hidden = false;
   el.innerHTML =
     "<div class='tb-k'>Max buy to clear " + esc(fmt$(targetGross)) + " gross</div>" +
