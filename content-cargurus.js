@@ -32,6 +32,24 @@
   const norm = (s) =>
     (s || "").toString().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
+  // Classify a listing's body style from whatever text we have (raw fields +
+  // trim/model). Convertible synonyms include Cabriolet/Roadster; returns null
+  // when nothing identifiable is present (so it's treated as "unknown", not a
+  // mismatch).
+  function bodyStyleOf(text) {
+    const t = " " + norm(text) + " ";
+    if (/ (convertible|cabriolet|cabrio|roadster|spyder|spider) /.test(t)) return "convertible";
+    if (/ (coupe) /.test(t)) return "coupe";
+    if (/ (wagon|estate|touring|avant|sportwagen|allroad) /.test(t)) return "wagon";
+    if (/ (hatchback|hatch) /.test(t)) return "hatchback";
+    if (/ (minivan) /.test(t)) return "van";
+    if (/ (pickup|crew cab|extended cab|regular cab|quad cab|double cab|king cab|supercab|supercrew|crewmax) /.test(t)) return "truck";
+    if (/ (suv|crossover) /.test(t)) return "suv";
+    if (/ (van) /.test(t)) return "van";
+    if (/ (sedan|saloon) /.test(t)) return "sedan";
+    return null;
+  }
+
   // Resolve a make name to CarGurus' "m<id>" entity.
   function resolveMakeEntity(makeName) {
     const makes = self.CARGURUS_MAKES || {};
@@ -196,6 +214,9 @@
       make: r.makeName,
       model: r.modelName,
       trim: r.trimName || "",
+      // Detected body style, checking several possible CarGurus fields plus the
+      // trim/model text so it works regardless of the exact field name.
+      body: bodyStyleOf([r.bodyTypeName, r.bodyStyleName, r.bodyType, r.bodyStyle, r.body, r.trimName, r.modelName].filter(Boolean).join(" ")),
       mileage: r.mileage,
       price: r.price,
       totalPrice: r.totalPrice || r.price,
@@ -292,6 +313,11 @@
       .filter((v) => Number.isFinite(v) && v >= spec.radius);
     const radii = [...new Set(ladder)].sort((a, b) => a - b);
 
+    // Body style is a hard filter: a convertible appraisal must not pull in
+    // sedans/coupes. Comps whose body style we can't identify are kept (unknown
+    // != mismatch), so we only drop a comp we can positively tell is different.
+    const wantBody = spec.bodyStyle && spec.bodyStyle !== "any" ? String(spec.bodyStyle).toLowerCase() : null;
+
     let pool = [];
     let usedRadius = spec.radius;
     let rawFetched = 0;
@@ -302,6 +328,7 @@
       pool = raw
         .map(shapeComp)
         .filter((c) => modelMatches(spec.model, c.model))
+        .filter((c) => !wantBody || !c.body || c.body === wantBody)
         // Drop nationwide-delivery listings that sit outside the searched radius.
         .filter((c) => !Number.isFinite(c.distance) || c.distance <= radius);
       if (pool.length >= target) break;

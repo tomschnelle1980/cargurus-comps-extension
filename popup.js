@@ -46,7 +46,22 @@ function readSubjectVehicle(selectors) {
   const txt = (el) => (el && (el.value || el.textContent) || "").trim();
   const bySel = (sel) => { try { return sel ? txt(document.querySelector(sel)) : ""; } catch (e) { return ""; } };
 
-  const out = { year: "", make: "", model: "", trim: "", mileage: "", source: "none", candidates: [] };
+  const out = { year: "", make: "", model: "", trim: "", mileage: "", bodyStyle: "", source: "none", candidates: [] };
+
+  // Body style from a piece of text (convertible=cabriolet=roadster, etc.).
+  const detectBody = (s) => {
+    const t = " " + String(s || "").toLowerCase() + " ";
+    if (/convertible|cabriolet|cabrio|roadster|spyder|spider|drop\s?top/.test(t)) return "convertible";
+    if (/coupe/.test(t)) return "coupe";
+    if (/wagon|estate|touring|avant|sportwagen|allroad|shooting brake/.test(t)) return "wagon";
+    if (/hatchback/.test(t)) return "hatchback";
+    if (/minivan|mini van/.test(t)) return "van";
+    if (/pickup|crew cab|extended cab|regular cab|quad cab|double cab|king cab|super ?cab|supercrew|crewmax/.test(t)) return "truck";
+    if (/\bsuv\b|sport utility|crossover/.test(t)) return "suv";
+    if (/\bvan\b/.test(t)) return "van";
+    if (/sedan|saloon|4dr|four door/.test(t)) return "sedan";
+    return "";
+  };
 
   // 1) Configured selectors win.
   if (selectors && Object.keys(selectors).length) {
@@ -124,6 +139,10 @@ function readSubjectVehicle(selectors) {
   if (!m) m = body.match(/([\d]{1,3}(?:,\d{3})+|\d{4,6})\s*(?:mi\b|miles\b)/i);
   if (m) out.mileage = m[1].replace(/[^\d]/g, "");
 
+  // 4) Body style from the vehicle heading — used to drop wrong body styles
+  // (e.g. sedans/coupes when appraising a convertible).
+  out.bodyStyle = detectBody(hit);
+
   return out;
 }
 
@@ -149,6 +168,7 @@ async function readActiveTab(settings, opts = {}) {
   // from the previous appraisal don't linger if the new tab is missing some.
   if (opts.manual) {
     ["year", "make", "model", "trim", "mileage"].forEach((id) => { $(id).value = ""; });
+    $("bodyStyle").value = "any";
     status.textContent = "Reading…";
     status.className = "pill";
   }
@@ -170,6 +190,7 @@ async function readActiveTab(settings, opts = {}) {
     if (v.model) $("model").value = v.model;
     if (v.trim) $("trim").value = v.trim;
     if (v.mileage) $("mileage").value = v.mileage;
+    $("bodyStyle").value = v.bodyStyle || "any";
 
     if (v.source === "selectors" || v.source === "heuristic") {
       status.textContent = "Read from page ✓";
@@ -190,6 +211,7 @@ function gatherSpec() {
     make: $("make").value.trim(),
     model: $("model").value.trim(),
     trim: $("strictTrim").checked ? $("trim").value.trim() : "",
+    bodyStyle: $("bodyStyle").value || "any",
     mileage: parseInt($("mileage").value.replace(/[^\d]/g, ""), 10) || null,
     zip: $("zip").value.replace(/[^\d]/g, ""),
     radius: parseInt($("radius").value, 10) || 100,
