@@ -20,6 +20,22 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Keep the service worker awake while a search is in flight. The flow has long
+// awaits (waiting for the CarGurus tab, then paged fetches); without this Chrome
+// can suspend the worker after ~30s, which silently drops the pending response
+// and leaves the panel spinning forever. Polling any async API resets the idle
+// timer. Cleared as soon as the search resolves.
+let keepAliveTimer = null;
+function startKeepAlive() {
+  if (keepAliveTimer != null) return;
+  keepAliveTimer = setInterval(() => {
+    chrome.runtime.getPlatformInfo(() => void chrome.runtime.lastError);
+  }, 20000);
+}
+function stopKeepAlive() {
+  if (keepAliveTimer != null) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+}
+
 async function findCarGurusTab() {
   const tabs = await chrome.tabs.query({ url: "https://*.cargurus.com/*" });
   // Prefer a fully loaded tab.
@@ -115,6 +131,7 @@ function runSearchOnTab(tabId, spec) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "FIND_COMPS") {
     (async () => {
+      startKeepAlive();
       try {
         const tabId = await ensureCarGurusTab();
         const result = await runSearchOnTab(tabId, msg.spec);
@@ -124,6 +141,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse(result);
       } catch (err) {
         sendResponse({ ok: false, error: String((err && err.message) || err) });
+      } finally {
+        stopKeepAlive();
       }
     })();
     return true; // async

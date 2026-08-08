@@ -371,7 +371,22 @@ async function findComps() {
   $("empty").hidden = true;
   $("loading").hidden = false;
 
+  // Safety net: never spin forever. If the background worker gets suspended
+  // mid-search (a Chrome MV3 quirk) its reply can be lost, leaving the panel
+  // stuck. Fail loudly with guidance after a hard timeout instead.
+  let settled = false;
+  const guard = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    $("findBtn").disabled = false;
+    render({ ok: false, error:
+      "CarGurus didn't respond in time. Two things to check: (1) open cargurus.com in a tab and clear any “verify you’re human” page, then try again; (2) if that's clear, just click Find comps once more — the background can nod off between searches." }, spec);
+  }, 90000);
+
   chrome.runtime.sendMessage({ type: "FIND_COMPS", spec }, (result) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(guard);
     $("findBtn").disabled = false;
     if (chrome.runtime.lastError) {
       render({ ok: false, error: chrome.runtime.lastError.message }, spec);
