@@ -40,6 +40,8 @@ let currentPricing = null;
 let acvUserEdited = false;
 // Inventory Plus market data (TrueScore Market + TrueTarget) read off the page.
 let subjectExtra = null;
+// Raw listings scanned on the last search (shown in the match line).
+let lastScanned = 0;
 
 // Cached settings so the "Read this tab" button can re-read on demand. The panel
 // stays open across tab switches, so this lets you pull a fresh vehicle without
@@ -449,10 +451,73 @@ function selectedComps() {
 function syncSelAll() {
   const selAll = $("selAll");
   if (!selAll) return;
-  const total = currentComps.length;
-  const n = selectedKeys.size;
+  const list = displayedComps();
+  const total = list.length;
+  const n = list.filter((c) => selectedKeys.has(c._key)).length;
   selAll.checked = total > 0 && n === total;
   selAll.indeterminate = n > 0 && n < total;
+}
+
+// The comps shown in the table: only the trim chosen in the filter, so other
+// trims (Rubicon 392 / X / 4xe) don't clutter the list. "*ALL*" shows all.
+function displayedComps() {
+  const v = ($("trimFilter") && $("trimFilter").value) || "*ALL*";
+  if (v === "*ALL*") return currentComps;
+  return currentComps.filter((c) => normTrim(c.trim) === v);
+}
+
+function renderCompTable() {
+  const list = displayedComps();
+  const tb = $("compTable").querySelector("tbody");
+  tb.innerHTML = "";
+  for (const c of list) {
+    const checked = selectedKeys.has(c._key);
+    const tr = document.createElement("tr");
+    tr.className = (c.exact ? "" : "widened") + (checked ? "" : " excluded");
+    const tag = c.exact ? "" : " <span class='wtag' title='Different year or mileage'>≈</span>";
+    tr.innerHTML =
+      "<td class='use'><input type='checkbox' class='rowsel' data-key='" + c._key + "'" + (checked ? " checked" : "") + " aria-label='Include this comp in pricing' /></td>" +
+      "<td>" + c.year + tag + " " + esc(c.model) + "<div class='trim'>" + esc(c.trim || "—") + "</div></td>" +
+      "<td class='num'>" + fmtN(c.mileage) + "</td>" +
+      "<td class='num'>" + fmt$(c.price) + "</td>" +
+      "<td class='num'>" + fmt$(c.expectedPrice) + "</td>" +
+      "<td><span class='rating " + (c.dealRating || "") + "'>" + ratingLabel(c.dealRating) + "</span></td>" +
+      "<td class='num'>" + (Number.isFinite(c.daysOnMarket) ? c.daysOnMarket : "—") + "</td>" +
+      "<td class='num'>" + (Number.isFinite(c.distance) ? c.distance + " mi" : "—") + "</td>" +
+      "<td>" + (c.url ? "<a href='" + c.url + "' target='_blank' rel='noopener'>" + esc(c.dealer || c.city || "view") + "</a>" : esc(c.dealer || c.city || "—")) + "</td>";
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll(".rowsel").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const key = cb.getAttribute("data-key");
+      if (cb.checked) selectedKeys.add(key); else selectedKeys.delete(key);
+      const tr = cb.closest("tr");
+      if (tr) tr.classList.toggle("excluded", !cb.checked);
+      applySelection(false);
+    });
+  });
+  const selAll = $("selAll");
+  if (selAll) {
+    selAll.onchange = () => {
+      const on = selAll.checked;
+      const keys = displayedComps().map((c) => c._key);
+      if (on) keys.forEach((k) => selectedKeys.add(k)); else keys.forEach((k) => selectedKeys.delete(k));
+      renderCompTable();
+      applySelection(false);
+    };
+  }
+}
+
+function updateMatchline() {
+  const el = $("matchline");
+  if (!el) return;
+  const list = displayedComps();
+  const v = ($("trimFilter") && $("trimFilter").value) || "*ALL*";
+  const trimName = v === "*ALL*" ? "matching" : (list[0] ? (list[0].trim || "") : subjectTrim);
+  el.innerHTML =
+    "<b>" + list.length + "</b> " + esc(trimName) + " comp" + (list.length === 1 ? "" : "s") + " found" +
+    (Number.isFinite(lastScanned) && lastScanned > 0 ? " · scanned " + lastScanned + " listings" : "") +
+    "<br><span class='hint'>Uncheck any row to drop it; use the Priced trim menu above to switch trims.</span>";
 }
 
 // Recompute pricing + chips + deal math from the checked comps. resetAcv=true
@@ -470,7 +535,7 @@ function applySelection(resetAcv) {
   }
   currentPricing = computePricingLocal(sel);
   renderChips(currentPricing);
-  if (note) note.innerHTML = "Pricing from <b>" + sel.length + "</b> of <b>" + currentComps.length + "</b> selected comps.";
+  if (note) note.innerHTML = "Pricing from <b>" + sel.length + "</b> of <b>" + displayedComps().length + "</b> shown comps.";
   // Re-seed the ACV to the Good-Deal buy on a fresh search, and on any selection
   // change UNLESS the user has typed/jumped their own ACV (then keep theirs).
   if (resetAcv) acvUserEdited = false;
@@ -555,58 +620,10 @@ function render(result, spec) {
   const defTrim = populateTrimFilter();
   selectedKeys = trimToKeys(defTrim, true);
 
-  // Match line (describes the found set; live pricing details live in #selnote)
-  const widened = comps.length - counts.exact;
-  $("matchline").innerHTML =
-    "<b>" + comps.length + "</b> comps found — <b>" + counts.exact + "</b> exact" +
-    (widened > 0 ? " + <b>" + widened + "</b> widened (" + esc(widenNotes.join(", ")) + ")" : "") +
-    (Number.isFinite(counts.rawFetched) ? " · scanned " + counts.rawFetched + " listings" : "") +
-    "<br><span class='hint'>Tip: uncheck any row (e.g. a higher trim) to drop it from the pricing above.</span>";
-
-  // Table
-  const tb = $("compTable").querySelector("tbody");
-  tb.innerHTML = "";
-  for (const c of currentComps) {
-    const checked = selectedKeys.has(c._key);
-    const tr = document.createElement("tr");
-    tr.className = (c.exact ? "" : "widened") + (checked ? "" : " excluded");
-    const tag = c.exact ? "" : " <span class='wtag' title='Widened to reach 10 comps'>≈</span>";
-    tr.innerHTML =
-      "<td class='use'><input type='checkbox' class='rowsel' data-key='" + c._key + "'" + (checked ? " checked" : "") + " aria-label='Include this comp in pricing' /></td>" +
-      "<td>" + c.year + tag + " " + esc(c.model) + "<div class='trim'>" + esc(c.trim || "—") + "</div></td>" +
-      "<td class='num'>" + fmtN(c.mileage) + "</td>" +
-      "<td class='num'>" + fmt$(c.price) + "</td>" +
-      "<td class='num'>" + fmt$(c.expectedPrice) + "</td>" +
-      "<td><span class='rating " + (c.dealRating || "") + "'>" + ratingLabel(c.dealRating) + "</span></td>" +
-      "<td class='num'>" + (Number.isFinite(c.daysOnMarket) ? c.daysOnMarket : "—") + "</td>" +
-      "<td class='num'>" + (Number.isFinite(c.distance) ? c.distance + " mi" : "—") + "</td>" +
-      "<td>" + (c.url ? "<a href='" + c.url + "' target='_blank' rel='noopener'>" + esc(c.dealer || c.city || "view") + "</a>" : esc(c.dealer || c.city || "—")) + "</td>";
-    tb.appendChild(tr);
-  }
-
-  // Wire per-row checkboxes + the header select-all.
-  tb.querySelectorAll(".rowsel").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const key = cb.getAttribute("data-key");
-      if (cb.checked) selectedKeys.add(key); else selectedKeys.delete(key);
-      const tr = cb.closest("tr");
-      if (tr) tr.classList.toggle("excluded", !cb.checked);
-      applySelection(false);
-    });
-  });
-  const selAll = $("selAll");
-  if (selAll) {
-    selAll.onchange = () => {
-      const on = selAll.checked;
-      selectedKeys = new Set(on ? currentComps.map((c) => c._key) : []);
-      tb.querySelectorAll(".rowsel").forEach((cb) => {
-        cb.checked = on;
-        const tr = cb.closest("tr");
-        if (tr) tr.classList.toggle("excluded", !on);
-      });
-      applySelection(false);
-    };
-  }
+  // Match line + comp table (table shows only the chosen trim).
+  lastScanned = Number.isFinite(counts.rawFetched) ? counts.rawFetched : 0;
+  renderCompTable();
+  updateMatchline();
 
   // Competition / market supply line
   renderMarket(result);
@@ -922,15 +939,11 @@ async function persistDealDefaults() {
   // Editing the subject mileage recenters the range window (±15k default).
   $("mileage").addEventListener("change", () => centerMileageWindow($("mileage").value));
 
-  // Trim filter: narrow the priced comps to one exact CarGurus trim.
+  // Trim filter: show only that trim's comps in the table and price against them.
   $("trimFilter").addEventListener("change", () => {
     selectedKeys = trimToKeys($("trimFilter").value, true);
-    document.querySelectorAll("#compTable .rowsel").forEach((cb) => {
-      const on = selectedKeys.has(cb.getAttribute("data-key"));
-      cb.checked = on;
-      const tr = cb.closest("tr");
-      if (tr) tr.classList.toggle("excluded", !on);
-    });
+    renderCompTable();
+    updateMatchline();
     applySelection(true);
   });
 
