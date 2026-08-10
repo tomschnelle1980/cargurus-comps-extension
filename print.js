@@ -117,7 +117,7 @@ async function init() {
   $("subject").textContent = subjectLine +
     (Number.isFinite(s.mileage) ? " · " + fmtN(s.mileage) + " miles" : "");
   $("meta").textContent =
-    "Cheapest comparable units for sale within " + (printData.radius || 500) + " miles" +
+    "Comparable units for sale within " + (printData.radius || 500) + " miles" +
     (printData.zip ? " of " + printData.zip : "") + " · " + formatDate() + " · Source: CarGurus.com";
   $("footer").textContent =
     "Actual retail listings for comparable vehicles. Prices, mileage, and availability shown as listed on " +
