@@ -84,6 +84,38 @@
     return null;
   }
 
+  // Pull a CarGurus model id from a listing object (field name varies).
+  function listingModelId(r) {
+    if (!r) return null;
+    const v = r.modelId != null ? r.modelId
+      : (r.modelID != null ? r.modelID
+      : ((r.model && r.model.id != null) ? r.model.id : null));
+    return (v != null && v !== "") ? String(v) : null;
+  }
+
+  // Resolve the model entity ("d<id>", e.g. Jeep Wrangler = d494) by peeking at a
+  // few pages of the make's listings and reading the model id off one that matches
+  // the subject model. Lets us search by model (Wranglers only) instead of make
+  // (all Jeeps) — far more of the right comps in far fewer pages.
+  async function resolveModelEntity(makeEntity, q, modelName) {
+    if (!modelName) return null;
+    let offset = 0;
+    for (let page = 0; page < 3; page++) {
+      let rows;
+      try { rows = await fetchListingsPage(makeEntity, q, offset); }
+      catch (e) { break; }
+      if (!rows.length) break;
+      for (const r of rows) {
+        if (r && r.modelName && modelMatches(modelName, r.modelName)) {
+          const id = listingModelId(r);
+          if (id) return "d" + id;
+        }
+      }
+      offset += rows.length;
+    }
+    return null;
+  }
+
   // q = { zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }
   async function fetchListingsPage(entity, q, offset) {
     const params = new URLSearchParams({
@@ -99,6 +131,7 @@
     if (q.endYear) params.set("endYear", String(q.endYear));
     if (Number.isFinite(q.minMileage)) params.set("minMileage", String(Math.max(0, q.minMileage)));
     if (Number.isFinite(q.maxMileage)) params.set("maxMileage", String(q.maxMileage));
+    params.set("newUsed", "2"); // used only, matching the appraisal use-case
     // Match CarGurus' own toggle: include nationwide-delivery listings (cars
     // beyond the radius that ship to the area) so counts line up with the site.
     params.set("isDeliveryEnabled", q.includeDelivery === false ? "false" : "true");
@@ -343,15 +376,25 @@
     const wantBody = spec.bodyStyle && spec.bodyStyle !== "any" ? String(spec.bodyStyle).toLowerCase() : null;
     const includeDelivery = spec.includeDelivery !== false;
 
+    // Scope the search to the specific model when we can resolve its entity, so
+    // pages come back as (e.g.) Wranglers rather than all Jeeps — far more of the
+    // right comps in far fewer pages. Falls back to the make search.
+    let searchEntity = entity;
+    if (spec.model) {
+      const me = await resolveModelEntity(entity, { zip: spec.zip, radius: spec.radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, spec.model);
+      if (me) searchEntity = me;
+    }
+    const scopedToModel = searchEntity !== entity;
+
     let pool = [];
     let usedRadius = spec.radius;
     let rawFetched = 0;
-    // Count model matches while paging so we can stop once we have plenty of the
-    // right model (we query by make, so most rows are other models of the make).
+    // When searching by make we page until we've collected plenty of the target
+    // model; when already scoped to the model, page until the result set is done.
     const modelMatchFn = (r) => modelMatches(spec.model, (r && r.modelName) || "");
     for (const radius of radii) {
       usedRadius = radius;
-      const raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, modelMatchFn, 150);
+      const raw = await fetchAllListings(searchEntity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, scopedToModel ? null : modelMatchFn, scopedToModel ? 0 : 150);
       rawFetched = raw.length;
       pool = raw
         .map(shapeComp)
