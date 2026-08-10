@@ -560,6 +560,7 @@ function render(result, spec) {
   $("matchline").innerHTML =
     "<b>" + comps.length + "</b> comps found — <b>" + counts.exact + "</b> exact" +
     (widened > 0 ? " + <b>" + widened + "</b> widened (" + esc(widenNotes.join(", ")) + ")" : "") +
+    (Number.isFinite(counts.rawFetched) ? " · scanned " + counts.rawFetched + " listings" : "") +
     "<br><span class='hint'>Tip: uncheck any row (e.g. a higher trim) to drop it from the pricing above.</span>";
 
   // Table

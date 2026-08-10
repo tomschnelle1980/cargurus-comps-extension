@@ -135,12 +135,15 @@
     return Array.isArray(data) ? data : [];
   }
 
-  // Pull enough pages to cover the make within the year/mileage/radius window.
-  async function fetchAllListings(entity, q) {
+  // Page through the make within the year/mileage/radius window. CarGurus returns
+  // a small page per call, so we keep advancing the offset until an empty page or
+  // no new rows. matchFn/want let us stop early once we've collected enough of the
+  // model we actually care about (we search by make, so most rows are other models).
+  async function fetchAllListings(entity, q, matchFn, want) {
     const all = [];
     const seen = new Set();
-    let offset = 0;
-    const MAX_PAGES = 10; // safety cap (~1000 rows)
+    let offset = 0, matched = 0;
+    const MAX_PAGES = 25; // safety cap
     for (let page = 0; page < MAX_PAGES; page++) {
       let rows;
       try {
@@ -149,14 +152,19 @@
         if (all.length) break; // keep whatever we already have
         throw e;
       }
-      if (!rows.length) break;
+      if (!rows.length) break;         // reached the end of the result set
       let added = 0;
       for (const r of rows) {
-        if (r && r.id && !seen.has(r.id)) { seen.add(r.id); all.push(r); added++; }
+        if (r && r.id && !seen.has(r.id)) {
+          seen.add(r.id);
+          all.push(r);
+          added++;
+          if (matchFn && matchFn(r)) matched++;
+        }
       }
-      if (added === 0) break;        // no new rows -> end of set
+      if (added === 0) break;          // offset returned only dupes -> end
       offset += rows.length;
-      if (rows.length < 40) break;   // last (short) page
+      if (matchFn && want && matched >= want) break; // enough of the target model
     }
     return all;
   }
@@ -338,9 +346,12 @@
     let pool = [];
     let usedRadius = spec.radius;
     let rawFetched = 0;
+    // Count model matches while paging so we can stop once we have plenty of the
+    // right model (we query by make, so most rows are other models of the make).
+    const modelMatchFn = (r) => modelMatches(spec.model, (r && r.modelName) || "");
     for (const radius of radii) {
       usedRadius = radius;
-      const raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery });
+      const raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, modelMatchFn, 150);
       rawFetched = raw.length;
       pool = raw
         .map(shapeComp)
