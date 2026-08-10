@@ -376,7 +376,14 @@
     );
 
     const exactCount = scored.filter((s) => s.exact).length;
-    const comps = scored.slice(0, Math.max(target, exactCount));
+    // Keep the whole matched set (capped for sanity) so the trim counts and
+    // pricing reflect the real market, not just the first ~10 comps. Prefer the
+    // trim-matched pool (e.g. every "Rubicon *") so the table isn't cluttered
+    // with unrelated trims; fall back to the full pool for rare cars that come
+    // up short. `target` still governs how far the radius ladder widens above.
+    let matchedPool = spec.trim ? scored.filter((c) => c.trimMatched) : scored.slice();
+    if (matchedPool.length < target) matchedPool = scored.slice();
+    const comps = matchedPool.slice(0, 150);
 
     // Price off the exact comps when we have a solid few; otherwise the whole set.
     const exactComps = comps.filter((c) => c.exact);
