@@ -84,6 +84,30 @@
     return null;
   }
 
+  // Resolve the model entity (e.g. Jeep Wrangler = "d494") by reading modelId off
+  // a listing whose modelName EXACTLY matches the subject model — exact so we get
+  // the gas "Wrangler" (d494), not "Wrangler 4xe" (d3134), a different model. The
+  // modelId is already in "d<id>" form, so it's used as-is.
+  async function resolveModelEntity(makeEntity, q, modelName) {
+    if (!modelName) return null;
+    const target = norm(modelName);
+    let offset = 0;
+    for (let page = 0; page < 4; page++) {
+      let rows;
+      try { rows = await fetchListingsPage(makeEntity, q, offset); }
+      catch (e) { break; }
+      if (!rows.length) break;
+      for (const r of rows) {
+        if (r && r.modelName && norm(r.modelName) === target &&
+            typeof r.modelId === "string" && /^d\d+$/.test(r.modelId)) {
+          return r.modelId;
+        }
+      }
+      offset += rows.length;
+    }
+    return null;
+  }
+
 
   // q = { zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }
   async function fetchListingsPage(entity, q, offset) {
@@ -344,18 +368,31 @@
     const wantBody = spec.bodyStyle && spec.bodyStyle !== "any" ? String(spec.bodyStyle).toLowerCase() : null;
     const includeDelivery = spec.includeDelivery !== false;
 
+    // Scope to the specific model when we can resolve its entity, so pages come
+    // back as (e.g.) gas Wranglers rather than all Jeeps — far more of the right
+    // comps in far fewer pages. Falls back to the make search.
+    let searchEntity = entity;
+    if (spec.model) {
+      const me = await resolveModelEntity(entity, { zip: spec.zip, radius: spec.radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, spec.model);
+      if (me) searchEntity = me;
+    }
+    const scopedToModel = searchEntity !== entity;
+
     let pool = [];
     let usedRadius = spec.radius;
     let rawFetched = 0;
-    let sampleRaw = null; // one raw listing, for field-name diagnostics
-    // Count model matches while paging so we can stop once we have plenty of the
-    // right model (we query by make, so most rows are other models of the make).
+    // When searching by make, page until we've collected plenty of the target
+    // model; when already scoped to the model, page through the whole result set.
     const modelMatchFn = (r) => modelMatches(spec.model, (r && r.modelName) || "");
     for (const radius of radii) {
       usedRadius = radius;
-      const raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, modelMatchFn, 150);
+      let raw = await fetchAllListings(searchEntity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, scopedToModel ? null : modelMatchFn, scopedToModel ? 0 : 150);
+      // Safety net: if scoping to the model returned nothing, fall back to the
+      // make search so we never regress to zero comps.
+      if (scopedToModel && raw.length === 0) {
+        raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, modelMatchFn, 150);
+      }
       rawFetched = raw.length;
-      if (!sampleRaw) sampleRaw = raw.find((r) => r && r.modelName && modelMatches(spec.model, r.modelName)) || raw[0] || null;
       pool = raw
         .map(shapeComp)
         .filter((c) => modelMatches(spec.model, c.model))
@@ -441,20 +478,6 @@
       .sort((a, b) => a.price - b.price)
       .slice(0, 24);
 
-    // Diagnostic: surface the make/model/trim-ish fields of one raw listing so we
-    // can see the real field names (e.g. which one holds the model id).
-    let diag = null;
-    if (sampleRaw && typeof sampleRaw === "object") {
-      const fields = {};
-      for (const k of Object.keys(sampleRaw)) {
-        if (/model|make|trim/i.test(k)) {
-          const v = sampleRaw[k];
-          if (v == null || typeof v !== "object") fields[k] = v;
-        }
-      }
-      diag = { fields, allKeys: Object.keys(sampleRaw) };
-    }
-
     return {
       ok: true,
       spec,
@@ -462,7 +485,6 @@
       usedRadius,
       target,
       cheapest,
-      diag,
       counts: {
         rawFetched,
         pool: pool.length,
