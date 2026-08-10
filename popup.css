@@ -59,6 +59,12 @@ html, body { margin: 0; }
 
 .dm-sec{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); opacity:.85; font-weight:700; margin:20px 0 8px;}
 
+.trimfilter{margin-top:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+.trimfilter .tf-label{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700;}
+.trimfilter select{font:inherit; padding:6px 9px; border:1px solid var(--accent); border-radius:8px; background:var(--bg); color:var(--text); font-weight:600; max-width:100%;}
+.trimfilter select:focus{outline:2px solid var(--accent); outline-offset:-1px;}
+.trimfilter .tf-note{font-size:10.5px; color:var(--muted); opacity:.75; flex-basis:100%;}
+
 .hero{background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent); border:1px solid var(--border); border-radius:14px; padding:16px 18px; margin-top:14px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;}
 .hero .hlbl{font-size:11.5px; color:var(--muted); font-weight:600; display:flex; align-items:center; gap:7px;}
 .tag-edit{font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); padding:2px 6px; border-radius:5px;}

@@ -333,6 +333,70 @@ function ratingLabel(r) {
 let currentComps = [];
 let currentSpec = null;
 let selectedKeys = new Set();
+let subjectTrim = "";
+
+const normTrim = (s) => (s || "").toString().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const DOOR_WORDS = new Set(["2", "4", "door", "dr", "2dr", "4dr", "2door", "4door", "wd", "4wd", "2wd", "awd", "rwd", "fwd"]);
+
+// Keys of comps for a chosen trim value ("*ALL*" = all fuzzy-matching trims).
+// preferExact tightens to same-trim comps that also matched year/mileage/distance.
+function trimToKeys(v, preferExact) {
+  let base;
+  if (v === "*ALL*") {
+    base = currentComps.filter((c) => c.trimMatched);
+    if (!base.length) base = currentComps.slice();
+  } else {
+    base = currentComps.filter((c) => normTrim(c.trim) === v);
+  }
+  if (preferExact) {
+    const ex = base.filter((c) => c.exact);
+    if (ex.length >= 3) base = ex;
+  }
+  return new Set(base.map((c) => c._key));
+}
+
+// Smart default trim: among trims that fuzzy-match the subject, prefer the one
+// with the fewest extra qualifier tokens (so "Rubicon 4-Door" beats "Rubicon
+// 392" / "Rubicon X"), then the most common.
+function chooseDefaultTrim(entries) {
+  const subj = normTrim(subjectTrim).split(" ").filter(Boolean);
+  const matched = entries.filter(([, e]) => e.matched);
+  const pool = matched.length ? matched : entries;
+  let best = "*ALL*", bestScore = Infinity;
+  for (const [key, e] of pool) {
+    const extras = key.split(" ").filter(Boolean).filter((t) => !subj.includes(t) && !DOOR_WORDS.has(t)).length;
+    const score = extras * 1000 - e.count; // fewest extras, then most common
+    if (score < bestScore) { bestScore = score; best = key; }
+  }
+  return best;
+}
+
+// Build the trim-filter <select> from the comps; returns the default value and
+// hides the control when there's only one trim (nothing to choose).
+function populateTrimFilter() {
+  const wrap = $("trimFilterWrap"), sel = $("trimFilter");
+  if (!sel) return "*ALL*";
+  const map = new Map();
+  for (const c of currentComps) {
+    const key = normTrim(c.trim || "");
+    if (!key) continue;
+    const e = map.get(key) || { name: (c.trim || "").trim(), count: 0, matched: false };
+    e.count++;
+    if (c.trimMatched) e.matched = true;
+    map.set(key, e);
+  }
+  const entries = [...map.entries()].sort((a, b) => b[1].count - a[1].count);
+  const def = chooseDefaultTrim(entries);
+  const allCount = currentComps.filter((c) => c.trimMatched).length || currentComps.length;
+  let html = "<option value='*ALL*'>All matching trims (" + allCount + ")</option>";
+  for (const [key, e] of entries) {
+    html += "<option value='" + esc(key) + "'>" + esc(e.name) + " (" + e.count + ")</option>";
+  }
+  sel.innerHTML = html;
+  sel.value = def;
+  if (wrap) wrap.hidden = entries.length <= 1;
+  return def;
+}
 
 const RATING_RANK_P = { GREAT_PRICE: 5, GOOD_PRICE: 4, FAIR_PRICE: 3, HIGH_PRICE: 2, OVERPRICED: 1 };
 const RATING_LABEL_P = {
@@ -485,9 +549,11 @@ function render(result, spec) {
   // rows unchecked) so the headline value isn't skewed by other trims.
   currentComps = comps.map((c, i) => Object.assign(c, { _key: "i" + i }));
   currentSpec = spec;
-  const exactCount = currentComps.filter((c) => c.exact).length;
-  const initialSel = exactCount >= 3 ? currentComps.filter((c) => c.exact) : currentComps;
-  selectedKeys = new Set(initialSel.map((c) => c._key));
+  subjectTrim = (spec.trim || "").trim();
+  // Trim filter drives the default selection: price against one CarGurus trim
+  // (e.g. "Rubicon 4-Door 4WD"), not every "Rubicon*" variant.
+  const defTrim = populateTrimFilter();
+  selectedKeys = trimToKeys(defTrim, true);
 
   // Match line (describes the found set; live pricing details live in #selnote)
   const widened = comps.length - counts.exact;
@@ -854,6 +920,18 @@ async function persistDealDefaults() {
   $("readBtn").addEventListener("click", () => readActiveTab(currentSettings || DEFAULTS, { manual: true }));
   // Editing the subject mileage recenters the range window (±15k default).
   $("mileage").addEventListener("change", () => centerMileageWindow($("mileage").value));
+
+  // Trim filter: narrow the priced comps to one exact CarGurus trim.
+  $("trimFilter").addEventListener("change", () => {
+    selectedKeys = trimToKeys($("trimFilter").value, true);
+    document.querySelectorAll("#compTable .rowsel").forEach((cb) => {
+      const on = selectedKeys.has(cb.getAttribute("data-key"));
+      cb.checked = on;
+      const tr = cb.closest("tr");
+      if (tr) tr.classList.toggle("excluded", !on);
+    });
+    applySelection(true);
+  });
 
   // Deal-math build-up: ACV is editable; quick buttons jump ACV to a rating.
   // Typing or jumping marks ACV as user-set so comp toggles won't overwrite it.
