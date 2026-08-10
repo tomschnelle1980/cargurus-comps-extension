@@ -347,6 +347,7 @@
     let pool = [];
     let usedRadius = spec.radius;
     let rawFetched = 0;
+    let sampleRaw = null; // one raw listing, for field-name diagnostics
     // Count model matches while paging so we can stop once we have plenty of the
     // right model (we query by make, so most rows are other models of the make).
     const modelMatchFn = (r) => modelMatches(spec.model, (r && r.modelName) || "");
@@ -354,6 +355,7 @@
       usedRadius = radius;
       const raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, modelMatchFn, 150);
       rawFetched = raw.length;
+      if (!sampleRaw) sampleRaw = raw.find((r) => r && r.modelName && modelMatches(spec.model, r.modelName)) || raw[0] || null;
       pool = raw
         .map(shapeComp)
         .filter((c) => modelMatches(spec.model, c.model))
@@ -439,6 +441,20 @@
       .sort((a, b) => a.price - b.price)
       .slice(0, 24);
 
+    // Diagnostic: surface the make/model/trim-ish fields of one raw listing so we
+    // can see the real field names (e.g. which one holds the model id).
+    let diag = null;
+    if (sampleRaw && typeof sampleRaw === "object") {
+      const fields = {};
+      for (const k of Object.keys(sampleRaw)) {
+        if (/model|make|trim/i.test(k)) {
+          const v = sampleRaw[k];
+          if (v == null || typeof v !== "object") fields[k] = v;
+        }
+      }
+      diag = { fields, allKeys: Object.keys(sampleRaw) };
+    }
+
     return {
       ok: true,
       spec,
@@ -446,6 +462,7 @@
       usedRadius,
       target,
       cheapest,
+      diag,
       counts: {
         rawFetched,
         pool: pool.length,

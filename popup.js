@@ -625,6 +625,20 @@ function render(result, spec) {
   renderCompTable();
   updateMatchline();
 
+  // Temporary diagnostic: show a raw listing's make/model/trim field names so we
+  // can wire model-scoped search to the real fields.
+  const diagEl = $("diag");
+  if (diagEl) {
+    const f = result.diag && result.diag.fields;
+    if (f && Object.keys(f).length) {
+      const rows = Object.keys(f).map((k) => esc(k) + " = " + esc(String(f[k])));
+      diagEl.innerHTML = "<b>🔧 field diagnostic — screenshot this:</b><br>" + rows.join(" · ");
+      diagEl.hidden = false;
+    } else {
+      diagEl.hidden = true;
+    }
+  }
+
   // Competition / market supply line
   renderMarket(result);
   // Inventory Plus market panel (from the page read)
