@@ -332,6 +332,15 @@
       return { ok: false, error: 'Could not match make "' + spec.make + '" to a CarGurus make. Check the make field.' };
     }
 
+    // Some makes name models differently than Inventory Plus. Map the subject
+    // model to CarGurus' name (e.g. MINI "Hardtop" -> "Cooper", where 2-door vs
+    // 4-door then lives in the trim) so model + trim matching lines up.
+    const MODEL_ALIASES = {
+      "mini": { "hardtop": "Cooper", "hardtop 2 door": "Cooper", "hardtop 4 door": "Cooper" }
+    };
+    const _aliasMap = MODEL_ALIASES[norm(spec.make)] || {};
+    const model = _aliasMap[norm(spec.model)] || spec.model;
+
     const target = Number.isFinite(spec.targetCount) ? spec.targetCount : 10;
     const hasMiles = Number.isFinite(spec.mileage) && spec.mileage > 0;
     const Y = spec.year || null;
@@ -372,8 +381,8 @@
     // back as (e.g.) gas Wranglers rather than all Jeeps — far more of the right
     // comps in far fewer pages. Falls back to the make search.
     let searchEntity = entity;
-    if (spec.model) {
-      const me = await resolveModelEntity(entity, { zip: spec.zip, radius: spec.radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, spec.model);
+    if (model) {
+      const me = await resolveModelEntity(entity, { zip: spec.zip, radius: spec.radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, model);
       if (me) searchEntity = me;
     }
     const scopedToModel = searchEntity !== entity;
@@ -384,7 +393,7 @@
     let sampleModels = []; // distinct "model | trim" from the fetch, for the no-match message
     // When searching by make, page until we've collected plenty of the target
     // model; when already scoped to the model, page through the whole result set.
-    const modelMatchFn = (r) => modelMatches(spec.model, (r && r.modelName) || "");
+    const modelMatchFn = (r) => modelMatches(model, (r && r.modelName) || "");
     for (const radius of radii) {
       usedRadius = radius;
       let raw = await fetchAllListings(searchEntity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, scopedToModel ? null : modelMatchFn, scopedToModel ? 0 : 150);
@@ -399,7 +408,7 @@
       }
       pool = raw
         .map(shapeComp)
-        .filter((c) => modelMatches(spec.model, c.model))
+        .filter((c) => modelMatches(model, c.model))
         .filter((c) => !wantBody || !c.body || c.body === wantBody)
         // When delivery listings are included, keep cars beyond the radius (they
         // ship to the area), matching CarGurus. Otherwise cap at the radius.
@@ -412,7 +421,7 @@
     const scored = pool.map((c) => {
       const yearDiff = Y && Number.isFinite(c.year) ? Math.abs(c.year - Y) : 0;
       const mileDiff = hasMiles && Number.isFinite(c.mileage) ? Math.abs(c.mileage - spec.mileage) : 0;
-      const trimOk = trimMatches(spec.trim, c.trim, spec.model);
+      const trimOk = trimMatches(spec.trim, c.trim, model);
       const inWindow = !hasWindow || (Number.isFinite(c.mileage) && c.mileage >= winMin && c.mileage <= winMax);
       const exact =
         (!Y || c.year === Y) &&
