@@ -596,12 +596,16 @@ function render(result, spec) {
   if (!comps.length) {
     $("results").hidden = true;
     const empty = $("empty");
+    const samples = (result.sampleModels || []);
     empty.innerHTML =
       "<b>No matching comps found.</b><br>" +
       "Fetched " + counts.rawFetched + " " + spec.make +
       " listings out to " + (usedRadius || spec.radius) + " mi, but none matched <b>" +
       [spec.model, spec.trim].filter(Boolean).join(" ") + "</b>" +
-      ".<br>Try a bigger radius, or uncheck “Match trim”.";
+      ".<br>Try a bigger radius, or uncheck “Match trim”." +
+      (samples.length
+        ? "<br><br><span class='hint'>CarGurus returned models · trims like:<br>" + samples.map(esc).join("<br>") + "</span>"
+        : "");
     empty.hidden = false;
     return;
   }

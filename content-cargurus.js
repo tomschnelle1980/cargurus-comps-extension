@@ -381,6 +381,7 @@
     let pool = [];
     let usedRadius = spec.radius;
     let rawFetched = 0;
+    let sampleModels = []; // distinct "model | trim" from the fetch, for the no-match message
     // When searching by make, page until we've collected plenty of the target
     // model; when already scoped to the model, page through the whole result set.
     const modelMatchFn = (r) => modelMatches(spec.model, (r && r.modelName) || "");
@@ -393,6 +394,9 @@
         raw = await fetchAllListings(entity, { zip: spec.zip, radius, startYear, endYear, minMileage, maxMileage, includeDelivery }, modelMatchFn, 150);
       }
       rawFetched = raw.length;
+      if (!sampleModels.length && raw.length) {
+        sampleModels = [...new Set(raw.map((r) => ((r && r.modelName) || "?") + " · " + ((r && r.trimName) || "?")))].slice(0, 12);
+      }
       pool = raw
         .map(shapeComp)
         .filter((c) => modelMatches(spec.model, c.model))
@@ -485,6 +489,7 @@
       usedRadius,
       target,
       cheapest,
+      sampleModels,
       counts: {
         rawFetched,
         pool: pool.length,
