@@ -644,11 +644,13 @@ function renderMarket(result) {
   const buckets = result.distanceBuckets || [];
   if (!comp) { el.innerHTML = ""; return; }
   const widened = result.usedRadius > comp.radius;
+  const notes = (result.widenNotes || []);
   el.innerHTML =
     "<b>Competition:</b> " + comp.withinRadius + " comparable unit" + (comp.withinRadius === 1 ? "" : "s") +
     " for sale within " + comp.radius + " mi" +
     (widened ? " · expanded to <b>" + result.usedRadius + " mi</b> to reach " + result.counts.used + " comps" : "") +
-    (buckets.length ? "<br><span class='buckets'>" + buckets.map((b) => b.mi + " mi: <b>" + b.count + "</b>").join(" · ") + "</span>" : "");
+    (buckets.length ? "<br><span class='buckets'>" + buckets.map((b) => b.mi + " mi: <b>" + b.count + "</b>").join(" · ") + "</span>" : "") +
+    (notes.length ? "<br><span class='widen'>⚠ Widened: " + notes.map(esc).join(" · ") + "</span>" : "");
 }
 
 const acvVal = () => num($("acv").value);

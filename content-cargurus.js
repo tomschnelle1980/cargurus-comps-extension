@@ -450,6 +450,15 @@
     // up short. `target` still governs how far the radius ladder widens above.
     let matchedPool = spec.trim ? scored.filter((c) => c.trimMatched) : scored.slice();
     if (matchedPool.length < target) matchedPool = scored.slice();
+    // Same model year is a hard relevance filter for a customer-facing tool: a
+    // 2026 appraisal must not be shown against 2024 units. Keep only the subject
+    // year whenever any exist; fall back to the (±2) fetch window only when there
+    // are zero same-year listings, and flag that so the panel can warn.
+    const sameYr = (c) => !Y || c.year === Y;
+    const yearScoped = (arr) => { const sy = arr.filter(sameYr); return sy.length ? sy : arr; };
+    const yearFallback = !!Y && scored.some((c) => c.trimMatched || !spec.trim) &&
+      !scored.some((c) => sameYr(c) && (c.trimMatched || !spec.trim));
+    matchedPool = yearScoped(matchedPool);
     const comps = matchedPool.slice(0, 150);
 
     // Price off the exact comps when we have a solid few; otherwise the whole set.
@@ -458,7 +467,9 @@
 
     // Describe how (if at all) the search was widened to reach the target.
     const widenNotes = [];
-    if (comps.some((c) => c.yearDiff > 0)) {
+    if (yearFallback) {
+      widenNotes.push("no " + Y + " listings — showing nearest years");
+    } else if (comps.some((c) => c.yearDiff > 0)) {
       const maxY = Math.max(...comps.map((c) => c.yearDiff));
       widenNotes.push("±" + maxY + " model year" + (maxY > 1 ? "s" : ""));
     }
@@ -472,6 +483,8 @@
     // Safety net: if trim filtering leaves nothing (e.g. odd trim naming), fall
     // back to the model-matched pool so the counts reflect the cars we show.
     if (spec.trim && comparable.length === 0) comparable = scored;
+    // Same relevance rule as the priced set: same model year only (unless none).
+    comparable = yearScoped(comparable);
     const thresholds = [25, 50, 75, 100, 150, 200, 300, 500].filter((t) => t <= usedRadius);
     if (!thresholds.length || thresholds[thresholds.length - 1] !== usedRadius) thresholds.push(usedRadius);
     const distanceBuckets = thresholds.map((mi) => ({
@@ -485,11 +498,10 @@
       withinUsed: comparable.length
     };
 
-    // Cheapest comparable listings for the printable customer handout. Prefer the
-    // exact model year; only fall back to adjacent years if too few same-year exist.
-    const sameYear = comparable.filter((c) => !Y || c.year === Y);
-    const printPool = sameYear.length >= 4 ? sameYear : comparable;
-    const cheapest = printPool
+    // Cheapest comparable listings for the printable customer handout. `comparable`
+    // is already scoped to the subject model year (falling back to nearest years
+    // only when there are none), so the handout stays year-relevant.
+    const cheapest = comparable
       .filter((c) => Number.isFinite(c.price) && c.price > 0)
       .sort((a, b) => a.price - b.price)
       .slice(0, 24);
@@ -509,6 +521,7 @@
         used: comps.length
       },
       widenNotes,
+      yearFallback,
       distanceBuckets,
       competition,
       pricingExactBased: exactComps.length >= 3,
