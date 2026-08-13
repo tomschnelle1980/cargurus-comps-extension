@@ -789,6 +789,14 @@ async function waitForCG(tabId, timeoutMs) {
   return false;
 }
 
+// Guard any await so a hung Chrome call can't freeze the panel on one stage.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms))
+  ]);
+}
+
 async function ensureCarGurusTab(stage) {
   stage("Looking for a CarGurus tab…");
   const tabs = await chrome.tabs.query({ url: "https://*.cargurus.com/*" });
@@ -801,29 +809,48 @@ async function ensureCarGurusTab(stage) {
   }
 
   stage("Waiting for CarGurus to load…");
-  let ready = await waitForCG(tab.id, created ? 25000 : 4000);
+  let ready = await waitForCG(tab.id, created ? 20000 : 4000);
 
+  // An existing tab that won't answer is almost always an orphaned content
+  // script — left over from reloading the extension while the tab was open — or
+  // a stale page. Reloading it re-injects a fresh, connected content script.
+  if (!ready && !created) {
+    stage("Reloading CarGurus…");
+    try {
+      await withTimeout(chrome.tabs.reload(tab.id), 3000).catch(() => {});
+      ready = await waitForCG(tab.id, 20000);
+    } catch (e) { /* ignore */ }
+  }
+
+  // Last resort: re-inject directly. Time-boxed so this step can never hang the
+  // panel the way an un-guarded executeScript could.
   if (!ready) {
     stage("Preparing CarGurus…");
     try {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["cargurus-makes.js", "content-cargurus.js"] });
+      await withTimeout(
+        chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["cargurus-makes.js", "content-cargurus.js"] }),
+        8000
+      );
       ready = await waitForCG(tab.id, 5000);
     } catch (e) { /* ignore */ }
   }
+
+  // Still nothing (created tab that never became ready): one reload attempt.
   if (!ready) {
     stage("Reloading CarGurus…");
     try {
-      await chrome.tabs.reload(tab.id);
-      ready = await waitForCG(tab.id, 25000);
+      await withTimeout(chrome.tabs.reload(tab.id), 3000).catch(() => {});
+      ready = await waitForCG(tab.id, 20000);
     } catch (e) { /* ignore */ }
   }
+
   if (!ready) {
     // Bring the CarGurus tab to the front so the user can see/clear a CAPTCHA.
     try {
       await chrome.tabs.update(tab.id, { active: true });
       await chrome.windows.update(tab.windowId, { focused: true });
     } catch (e) { /* ignore */ }
-    throw new Error("Couldn't reach CarGurus. I brought the CarGurus tab to the front — if it's showing a “verify you're human”/CAPTCHA page, clear it, come back here, and click Find comps again.");
+    throw new Error("Couldn't reach CarGurus. I brought its tab to the front — if it shows a “verify you're human”/CAPTCHA page, clear it, then click Find comps again. Otherwise close every cargurus.com tab and click Find comps to open a fresh one.");
   }
   return tab.id;
 }
