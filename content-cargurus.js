@@ -225,8 +225,11 @@
     if (!s) return true;        // no subject trim -> don't filter on trim
     if (!c) return false;
     if (s === c) return true;
-    // token overlap: every meaningful subject-trim token appears in comp trim
-    const stop = new Set(["4matic", "awd", "fwd", "rwd", "sedan", "coupe", "suv", "4dr", "2dr"]);
+    // token overlap: every meaningful subject-trim token appears in comp trim.
+    // "series"/"class" are model-designator fillers (BMW "7 Series", Mercedes
+    // "C-Class") that CarGurus keeps in the MODEL name, never the trim — so a
+    // subject trim of "Series 760i xDrive" must not force a false mismatch.
+    const stop = new Set(["4matic", "awd", "fwd", "rwd", "sedan", "coupe", "suv", "4dr", "2dr", "series", "class"]);
     const sTokens = s.split(" ").filter(t => t && !stop.has(t));
     if (!sTokens.length) return c.includes(s) || s.includes(c);
     return sTokens.every(t => c.includes(t));
