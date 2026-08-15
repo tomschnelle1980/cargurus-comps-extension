@@ -4,6 +4,9 @@
 const $ = (id) => document.getElementById(id);
 const fmt$ = (n) => (Number.isFinite(n) ? "$" + Math.round(n).toLocaleString("en-US") : "—");
 const fmtN = (n) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") : "—");
+// A big radius means the "Nationwide" option; show that instead of "5000 mi".
+const NATIONWIDE_MI = 5000;
+const radLabel = (mi) => (Number(mi) >= NATIONWIDE_MI ? "nationwide" : mi + " mi");
 
 const DEFAULTS = {
   zip: "", radius: "100", variance: 15000, strictTrim: true, includeDelivery: true, selectors: {},
@@ -75,6 +78,9 @@ let acvUserEdited = false;
 let grossUserEdited = false;
 // Inventory Plus market data (TrueScore Market + TrueTarget) read off the page.
 let subjectExtra = null;
+// The last search result (comps + competition + fallback flags), for the
+// market-speed, confidence, and buy-to-hit widgets.
+let currentResult = null;
 // Raw listings scanned on the last search (shown in the match line).
 let lastScanned = 0;
 
@@ -443,7 +449,11 @@ function trimToKeys(v, preferExact) {
 function chooseDefaultTrim(entries) {
   const subj = normTrim(subjectTrim).split(" ").filter(Boolean);
   const matched = entries.filter(([, e]) => e.matched);
-  const pool = matched.length ? matched : entries;
+  // Nothing actually matched the subject trim — don't silently commit to a
+  // random most-common trim (e.g. price a "450h+ Luxury" off "350 AWD"). Show
+  // all trims so the mix is visible and the trim warning is honest.
+  if (!matched.length) return "*ALL*";
+  const pool = matched;
   let best = "*ALL*", bestScore = Infinity;
   for (const [key, e] of pool) {
     const extras = key.split(" ").filter(Boolean).filter((t) => !subj.includes(t) && !DOOR_WORDS.has(t)).length;
@@ -685,7 +695,7 @@ function render(result, spec) {
     empty.innerHTML =
       "<b>No matching comps found.</b><br>" +
       "Fetched " + counts.rawFetched + " " + spec.make +
-      " listings out to " + (usedRadius || spec.radius) + " mi, but none matched <b>" +
+      " listings out to " + radLabel(usedRadius || spec.radius) + ", but none matched <b>" +
       [spec.model, spec.trim].filter(Boolean).join(" ") + "</b>" +
       ".<br>Try a bigger radius, or uncheck “Match trim”." +
       (samples.length
@@ -697,6 +707,8 @@ function render(result, spec) {
 
   $("empty").hidden = true;
   $("results").hidden = false;
+  currentResult = result;
+  renderWarnBanner(result, spec);
 
   // Key each comp and pick the default selection. Mirror the server's pricing
   // basis: with >=3 exact comps, start with only the exact ones checked (widened
@@ -723,6 +735,25 @@ function render(result, spec) {
   applySelection(true);
 }
 
+// Loud, unmissable banner when the comp set isn't the exact trim/year — so a
+// wrong-trim or wrong-year price can't quietly drive an appraisal.
+function renderWarnBanner(result, spec) {
+  const el = $("warnBanner");
+  if (!el) return;
+  const msgs = [];
+  if (result.trimFallback && spec.trim) {
+    msgs.push("<b>No “" + esc(spec.trim) + "” listings found.</b> These comps are other " +
+      esc(spec.model || "model") + " trims, so this price may not fit your exact trim. " +
+      "Use the “Priced trim” menu, widen the radius/mileage, or treat the number as a rough guide.");
+  }
+  if (result.yearFallback && spec.year) {
+    msgs.push("<b>No " + esc(String(spec.year)) + " listings found.</b> Showing the nearest model years — values can be off for a brand-new car.");
+  }
+  if (!msgs.length) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.innerHTML = msgs.map((m) => "<div class='wb-row'>⚠ " + m + "</div>").join("");
+}
+
 function renderMarket(result) {
   const el = $("market");
   const comp = result.competition;
@@ -732,8 +763,8 @@ function renderMarket(result) {
   const notes = (result.widenNotes || []);
   el.innerHTML =
     "<b>Competition:</b> " + comp.withinRadius + " comparable unit" + (comp.withinRadius === 1 ? "" : "s") +
-    " for sale within " + comp.radius + " mi" +
-    (widened ? " · expanded to <b>" + result.usedRadius + " mi</b> to reach " + result.counts.used + " comps" : "") +
+    " for sale within " + radLabel(comp.radius) +
+    (widened ? " · expanded to <b>" + radLabel(result.usedRadius) + "</b> to reach " + result.counts.used + " comps" : "") +
     (buckets.length ? "<br><span class='buckets'>" + buckets.map((b) => b.mi + " mi: <b>" + b.count + "</b>").join(" · ") + "</span>" : "") +
     (notes.length ? "<br><span class='widen'>⚠ Widened: " + notes.map(esc).join(" · ") + "</span>" : "");
 }

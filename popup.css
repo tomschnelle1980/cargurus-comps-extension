@@ -246,6 +246,9 @@ label.chk input { width: auto; }
 
 .market { font-size: 11px; color: var(--muted); margin: 0 0 10px; }
 .market b { color: var(--text); }
+.warn-banner{background:color-mix(in srgb, var(--high) 14%, var(--bg)); border:1px solid color-mix(in srgb, var(--high) 45%, var(--border)); border-radius:11px; padding:10px 13px; margin:10px 0 4px; font-size:12.5px; line-height:1.45; color:var(--text);}
+.warn-banner .wb-row + .wb-row{margin-top:7px;}
+.warn-banner b{color:var(--high);}
 .market .buckets { display: inline-block; margin-top: 3px; }
 .market .widen { display: inline-block; margin-top: 3px; color: var(--high, #b26a00); font-weight: 600; }
 

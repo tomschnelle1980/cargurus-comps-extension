@@ -194,6 +194,24 @@
     return all;
   }
 
+  // Remap an Inventory Plus model to CarGurus' model name when they differ, so
+  // the model-scoped search and trim matching hit the right entity.
+  function aliasModel(spec) {
+    const mk = norm(spec.make), md = (spec.model || "").trim(), tr = spec.trim || "";
+    // MINI: Inventory Plus "Hardtop" is CarGurus "Cooper" (door count is in the trim).
+    const STATIC = { "mini": { "hardtop": "Cooper", "hardtop 2 door": "Cooper", "hardtop 4 door": "Cooper" } };
+    const hit = (STATIC[mk] || {})[norm(md)];
+    if (hit) return hit;
+    // Lexus splits hybrids into their own "<Model> Hybrid" model (e.g. an
+    // "NX 450h+ Luxury" lives under model "NX Hybrid", not "NX"). Detect the
+    // hybrid trim ("450h", "350h", "…h+", or the word Hybrid) and append it.
+    if (mk === "lexus" && !/hybrid/i.test(md) && /(\d{3}h\b|\d{3}h\+|hybrid)/i.test(tr) &&
+        /^(nx|rx|ux|es|is|gs|ls|ct|gx|lx|rz)\b/i.test(md)) {
+      return md + " Hybrid";
+    }
+    return md;
+  }
+
   function modelMatches(subjectModel, compModel) {
     const s = norm(subjectModel);
     const c = norm(compModel);
@@ -335,14 +353,9 @@
       return { ok: false, error: 'Could not match make "' + spec.make + '" to a CarGurus make. Check the make field.' };
     }
 
-    // Some makes name models differently than Inventory Plus. Map the subject
-    // model to CarGurus' name (e.g. MINI "Hardtop" -> "Cooper", where 2-door vs
-    // 4-door then lives in the trim) so model + trim matching lines up.
-    const MODEL_ALIASES = {
-      "mini": { "hardtop": "Cooper", "hardtop 2 door": "Cooper", "hardtop 4 door": "Cooper" }
-    };
-    const _aliasMap = MODEL_ALIASES[norm(spec.make)] || {};
-    const model = _aliasMap[norm(spec.model)] || spec.model;
+    // Some makes name models differently than Inventory Plus, so model + trim
+    // matching only lines up after remapping the subject model to CarGurus' name.
+    const model = aliasModel(spec);
 
     const target = Number.isFinite(spec.targetCount) ? spec.targetCount : 10;
     const hasMiles = Number.isFinite(spec.mileage) && spec.mileage > 0;
@@ -465,6 +478,12 @@
     const exactComps = comps.filter((c) => c.exact);
     const pricingBasis = exactComps.length >= 3 ? exactComps : comps;
 
+    // Did we end up showing an entirely DIFFERENT trim? (No comp matched the
+    // requested trim, so the pool fell back to other trims of the same model.)
+    // That's a pricing-accuracy risk worth flagging loudly.
+    const trimMatchedShown = spec.trim ? comps.filter((c) => c.trimMatched).length : comps.length;
+    const trimFallback = !!spec.trim && comps.length > 0 && trimMatchedShown === 0;
+
     // Describe how (if at all) the search was widened to reach the target.
     const widenNotes = [];
     if (yearFallback) {
@@ -473,9 +492,10 @@
       const maxY = Math.max(...comps.map((c) => c.yearDiff));
       widenNotes.push("±" + maxY + " model year" + (maxY > 1 ? "s" : ""));
     }
-    if (spec.trim && comps.some((c) => !c.trimMatched)) widenNotes.push("other trims");
+    if (trimFallback) widenNotes.push("no “" + spec.trim + "” comps — showing other " + spec.model + " trims");
+    else if (spec.trim && comps.some((c) => !c.trimMatched)) widenNotes.push("other trims");
     if (hasWindow && comps.some((c) => Number.isFinite(c.mileage) && (c.mileage < winMin || c.mileage > winMax))) widenNotes.push("wider mileage");
-    if (usedRadius > spec.radius) widenNotes.push(usedRadius + " mi radius");
+    if (usedRadius > spec.radius) widenNotes.push((usedRadius >= 5000 ? "nationwide" : usedRadius + " mi") + " radius");
 
     // Competition / market supply: the true comparable set (same model, and same
     // trim if one was given), across the searched years — bucketed by distance.
@@ -522,6 +542,7 @@
       },
       widenNotes,
       yearFallback,
+      trimFallback,
       distanceBuckets,
       competition,
       pricingExactBased: exactComps.length >= 3,
