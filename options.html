@@ -61,12 +61,29 @@
       <div><input id="titleFee" inputmode="numeric" placeholder="e.g. 410" /><div class="hint">Title/registration cost.</div></div>
     </div>
     <div class="row">
-      <label for="targetGross">Target gross</label>
-      <div><input id="targetGross" inputmode="numeric" placeholder="2500" /><div class="hint">Minimum front-end gross you want to hit (default $2,500).</div></div>
+      <label for="reconDefault">Default recon</label>
+      <div><input id="reconDefault" inputmode="numeric" placeholder="2500" /><div class="hint">Used when Inventory Plus has no reconditioning amount. The extension carries over the Inventory Plus recon when there is money there. Editable per vehicle in the popup.</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Gross profit rule</h2>
+    <p class="hint">The front-end gross auto-fills from this rule based on the retail price. Every deal gets at least the minimum; above that, the higher of the minimum or the band's margin (a percent of retail) is used. Any of these can be overridden per-vehicle in the popup.</p>
+    <div class="row">
+      <label for="minGross">Minimum gross</label>
+      <div><input id="minGross" inputmode="numeric" placeholder="2000" /><div class="hint">Dollar floor on every car (default $2,000).</div></div>
     </div>
     <div class="row">
-      <label for="reconDefault">Default recon</label>
-      <div><input id="reconDefault" inputmode="numeric" placeholder="2500" /><div class="hint">Starting recon each search (default $2,500). Editable per vehicle in the popup.</div></div>
+      <label for="margin30">$30k–$50k margin</label>
+      <div><input id="margin30" inputmode="decimal" placeholder="10" /><div class="hint">% of retail for retail prices $30,000–$50,000 (default 10%).</div></div>
+    </div>
+    <div class="row">
+      <label for="margin50">$50k–$80k margin</label>
+      <div><input id="margin50" inputmode="decimal" placeholder="8" /><div class="hint">% of retail for retail prices $50,000–$80,000 (default 8%).</div></div>
+    </div>
+    <div class="row">
+      <label for="margin80">$80k+ margin</label>
+      <div><input id="margin80" inputmode="decimal" placeholder="7" /><div class="hint">% of retail for retail prices above $80,000 (default 7%). Under $30k uses the minimum gross.</div></div>
     </div>
   </div>
 

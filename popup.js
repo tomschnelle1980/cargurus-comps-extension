@@ -7,8 +7,40 @@ const fmtN = (n) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-US") 
 
 const DEFAULTS = {
   zip: "", radius: "100", variance: 15000, strictTrim: true, includeDelivery: true, selectors: {},
-  dealerFee: "", titleFee: "", targetGross: 2500, reconDefault: 2500, theme: "auto"
+  dealerFee: "", titleFee: "", targetGross: 2500, reconDefault: 2500, theme: "auto",
+  // Gross-profit rule: a floor plus a margin (% of retail) by retail-price band.
+  // Editable per store in Settings.
+  minGross: 2000, margin30: 10, margin50: 8, margin80: 7
 };
+
+// Front-end gross rule. Margin is a percent of the retail (sale) price; the band
+// is chosen by that retail price, with a hard dollar floor under every deal.
+function minGrossOf(s) { return Number.isFinite(s && s.minGross) ? s.minGross : 2000; }
+function marginPctFor(retail, s) {
+  s = s || {};
+  if (retail >= 80000) return Number.isFinite(s.margin80) ? s.margin80 : 7;
+  if (retail >= 50000) return Number.isFinite(s.margin50) ? s.margin50 : 8;
+  if (retail >= 30000) return Number.isFinite(s.margin30) ? s.margin30 : 10;
+  return 0; // under $30k: just the dollar floor
+}
+// Suggested gross for a KNOWN retail price (gross = margin% × retail, floored).
+function grossForRetail(retail, s) {
+  const m = marginPctFor(retail, s) / 100;
+  const g = m > 0 ? Math.round(retail * m) : 0;
+  return Math.max(minGrossOf(s), g);
+}
+// Suggested gross from the cost basis (ACV + recon + title + dealer), where the
+// retail price = costBasis + gross. Solved by a few fixed-point passes so the
+// band is chosen consistently with the resulting retail.
+function ruleGross(costBasis, s) {
+  let gross = minGrossOf(s);
+  for (let i = 0; i < 3; i++) {
+    const retail = costBasis + gross;
+    const m = marginPctFor(retail, s) / 100;
+    gross = m > 0 ? Math.max(minGrossOf(s), Math.round(costBasis * m / (1 - m))) : minGrossOf(s);
+  }
+  return gross;
+}
 
 // Mileage range slider bounds + the default ± window centered on the subject.
 const MILE_MAX = 200000;
@@ -38,6 +70,9 @@ let currentPricing = null;
 // True once the user types/jumps their own ACV, so selection changes stop
 // re-seeding it. Reset on each new search.
 let acvUserEdited = false;
+// True once the user types their own front-end gross, so the margin rule stops
+// auto-filling it. Reset on each new search.
+let grossUserEdited = false;
 // Inventory Plus market data (TrueScore Market + TrueTarget) read off the page.
 let subjectExtra = null;
 // Raw listings scanned on the last search (shown in the match line).
@@ -58,7 +93,7 @@ function readSubjectVehicle(selectors) {
   const bySel = (sel) => { try { return sel ? txt(document.querySelector(sel)) : ""; } catch (e) { return ""; } };
 
   const out = { year: "", make: "", model: "", trim: "", mileage: "", bodyStyle: "",
-                target: "", turn: "", volume: "", market: "", source: "none", candidates: [] };
+                target: "", turn: "", volume: "", market: "", recon: "", source: "none", candidates: [] };
 
   // Body style from a piece of text (convertible=cabriolet=roadster, etc.).
   const detectBody = (s) => {
@@ -184,6 +219,45 @@ function readSubjectVehicle(selectors) {
     if (tgt) { const c = tgt.cloneNode(true); c.querySelectorAll(".subtitle").forEach((s) => s.remove()); out.target = (c.textContent || "").trim(); }
   } catch (e) { /* ignore */ }
 
+  // 6) Reconditioning $ from the Inventory Plus "Calculations" screen. Match the
+  // exact "Reconditioning" field (not "Recondition Est"/"Recondition") and read
+  // the dollar value from that row's input (or the nearest number beside it).
+  try {
+    const parseDollar = (s) => {
+      const mt = String(s || "").match(/\$?\s*([\d]{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)/);
+      return mt ? mt[1].replace(/[^\d.]/g, "") : "";
+    };
+    const rowValue = (el) => {
+      // Climb to the smallest ancestor that holds an <input>, and read it.
+      let node = el;
+      for (let i = 0; i < 4 && node; i++) {
+        const inp = node.querySelector && node.querySelector("input");
+        if (inp) { const d = parseDollar(inp.value); if (d) return d; }
+        node = node.parentElement;
+      }
+      // Otherwise scan the following siblings for an input or a bare number.
+      let sib = el.nextElementSibling;
+      for (let i = 0; i < 4 && sib; i++) {
+        const inp = sib.querySelector ? sib.querySelector("input") : null;
+        if (inp) { const d = parseDollar(inp.value); if (d) return d; }
+        const d = parseDollar(sib.textContent);
+        if (d) return d;
+        sib = sib.nextElementSibling;
+      }
+      return "";
+    };
+    const norm = (t) => String(t || "").toLowerCase().replace(/[^a-z]/g, "");
+    const cands = Array.from(document.querySelectorAll("label,span,div,td,th,p,strong,b"));
+    for (const el of cands) {
+      // Only the element's OWN direct text, so a big wrapper doesn't match.
+      const own = Array.from(el.childNodes).filter((n) => n.nodeType === 3)
+        .map((n) => n.textContent).join(" ").replace(/\s+/g, " ").trim();
+      if (norm(own) !== "reconditioning") continue;
+      const d = rowValue(el);
+      if (d) { out.recon = d; break; }
+    }
+  } catch (e) { /* ignore */ }
+
   return out;
 }
 
@@ -199,7 +273,7 @@ async function loadDefaults() {
   mileVariance = Number.isFinite(s.variance) ? s.variance : 15000;
   if (s.dealerFee !== "" && s.dealerFee != null) $("dealerFee").value = s.dealerFee;
   if (s.titleFee !== "" && s.titleFee != null) $("titleFee").value = s.titleFee;
-  $("targetGross").value = Number.isFinite(s.targetGross) ? s.targetGross : 2500;
+  $("targetGross").value = minGrossOf(s); // starting value; the margin rule fills it once comps load
   $("recon").value = Number.isFinite(s.reconDefault) ? s.reconDefault : 2500;
   return s;
 }
@@ -267,16 +341,16 @@ async function readActiveTab(settings, opts = {}) {
       args: [settings.selectors || {}]
     });
     const v = { year: "", make: "", model: "", trim: "", mileage: "", bodyStyle: "",
-                target: "", turn: "", volume: "", market: "", source: "none" };
+                target: "", turn: "", volume: "", market: "", recon: "", source: "none" };
     for (const r of (results || [])) {
       const o = r && r.result;
       if (!o) continue;
-      ["year", "make", "model", "trim", "mileage", "bodyStyle", "target", "turn", "volume", "market"].forEach((k) => {
+      ["year", "make", "model", "trim", "mileage", "bodyStyle", "target", "turn", "volume", "market", "recon"].forEach((k) => {
         if (!v[k] && o[k]) v[k] = o[k];
       });
       if (v.source === "none" && o.source && o.source !== "none") v.source = o.source;
     }
-    subjectExtra = { target: v.target, turn: v.turn, volume: v.volume, market: v.market };
+    subjectExtra = { target: v.target, turn: v.turn, volume: v.volume, market: v.market, recon: v.recon };
 
     if (v.year) $("year").value = v.year;
     if (v.make) $("make").value = v.make;
@@ -285,6 +359,12 @@ async function readActiveTab(settings, opts = {}) {
     if (v.mileage) $("mileage").value = v.mileage;
     $("bodyStyle").value = v.bodyStyle || "any";
     centerMileageWindow($("mileage").value);
+
+    // Reconditioning: carry over the Inventory Plus number when there's real
+    // money there; otherwise fall back to the store's default recon.
+    const pageRecon = parseInt(String(v.recon).replace(/[^\d]/g, ""), 10);
+    const defRecon = Number.isFinite(settings.reconDefault) ? settings.reconDefault : 2500;
+    $("recon").value = Number.isFinite(pageRecon) && pageRecon > 0 ? pageRecon : defRecon;
 
     if (v.source === "selectors" || v.source === "heuristic") {
       status.textContent = "Read from page ✓";
@@ -537,11 +617,16 @@ function applySelection(resetAcv) {
   renderChips(currentPricing);
   if (note) note.innerHTML = "Pricing from <b>" + sel.length + "</b> of <b>" + displayedComps().length + "</b> shown comps.";
   // Re-seed the ACV to the Good-Deal buy on a fresh search, and on any selection
-  // change UNLESS the user has typed/jumped their own ACV (then keep theirs).
-  if (resetAcv) acvUserEdited = false;
+  // change UNLESS the user has typed/jumped their own ACV (then keep theirs). The
+  // gross for that retail comes from the store's margin rule.
+  if (resetAcv) { acvUserEdited = false; grossUserEdited = false; }
   if ((resetAcv || !acvUserEdited) && Number.isFinite(currentPricing.goodDealPrice)) {
-    const costs = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value) + num($("targetGross").value);
-    $("acv").value = Math.max(0, Math.round(currentPricing.goodDealPrice - costs)).toLocaleString("en-US");
+    const s = currentSettings || DEFAULTS;
+    const retail = currentPricing.goodDealPrice;
+    const feesExGross = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value);
+    if (!grossUserEdited) $("targetGross").value = grossForRetail(retail, s);
+    const gross = num($("targetGross").value);
+    $("acv").value = Math.max(0, Math.round(retail - feesExGross - gross)).toLocaleString("en-US");
   }
   renderDealMath();
 }
@@ -682,9 +767,17 @@ function renderDealMath() {
     return;
   }
 
-  const recon = num($("recon").value), dealer = num($("dealerFee").value),
-        title = num($("titleFee").value), gross = num($("targetGross").value);
+  const recon = num($("recon").value), dealer = num($("dealerFee").value), title = num($("titleFee").value);
   const acv = acvVal();
+  // Front-end gross: the store's margin rule fills it from the retail price
+  // (floored at the minimum) unless the user has typed their own gross.
+  let gross;
+  if (grossUserEdited) {
+    gross = num($("targetGross").value);
+  } else {
+    gross = ruleGross(acv + recon + title + dealer, currentSettings || DEFAULTS);
+    $("targetGross").value = gross;
+  }
   const sale = acv + recon + title + dealer + gross;
 
   const imv = p.subjectImv;
@@ -704,13 +797,15 @@ function renderDealMath() {
   badge.style.setProperty("--tc", TIER[tier][1]);
   saleOut.textContent = fmt$(sale);
 
-  // price ladder
-  const segs = [["Great", LMIN, greatCeil, "var(--great)"], ["Good", greatCeil, goodCeil, "var(--good)"],
-                ["Fair", goodCeil, fairCeil, "var(--fair)"], ["High", fairCeil, highCeil, "var(--high)"],
-                ["Over", highCeil, LMAX, "var(--over)"]];
-  $("ladderBar").innerHTML = segs.map(([lab, lo, hi, col]) => {
+  // price ladder — each band is clickable to set the ACV so retail lands there.
+  const segs = [["Great", LMIN, greatCeil, "var(--great)", greatCeil], ["Good", greatCeil, goodCeil, "var(--good)", goodCeil],
+                ["Fair", goodCeil, fairCeil, "var(--fair)", fairCeil], ["High", fairCeil, highCeil, "var(--high)", highCeil],
+                ["Over", highCeil, LMAX, "var(--over)", highCeil]];
+  $("ladderBar").innerHTML = segs.map(([lab, lo, hi, col, price]) => {
     const w = Math.max(0, (hi - lo) / span * 100);
-    return "<div class='seg' style='width:" + w + "%;background:" + col + "'>" + (w > 9 ? lab : "") + "</div>";
+    return "<div class='seg' role='button' tabindex='0' data-retail='" + price +
+      "' title='Set ACV so retail = " + fmt$(price) + "' style='width:" + w + "%;background:" + col + "'>" +
+      (w > 9 ? lab : "") + "</div>";
   }).join("");
   $("tickLo").textContent = fmt$(LMIN); $("tickHi").textContent = fmt$(LMAX);
   const pct = Math.max(0, Math.min(100, (sale - LMIN) / span * 100));
@@ -954,8 +1049,7 @@ async function persistDealDefaults() {
   await chrome.storage.local.set({
     settings: Object.assign(cur, {
       dealerFee: $("dealerFee").value.replace(/[^\d]/g, ""),
-      titleFee: $("titleFee").value.replace(/[^\d]/g, ""),
-      targetGross: num($("targetGross").value)
+      titleFee: $("titleFee").value.replace(/[^\d]/g, "")
     })
   });
 }
@@ -980,27 +1074,47 @@ async function persistDealDefaults() {
     applySelection(true);
   });
 
-  // Deal-math build-up: ACV is editable; quick buttons jump ACV to a rating.
-  // Typing or jumping marks ACV as user-set so comp toggles won't overwrite it.
+  // Deal-math build-up: ACV is editable; the tier buttons and the ladder bands
+  // jump the ACV so the retail price lands at that rating. Back into the ACV from
+  // the target retail, applying the store margin rule for the gross at that price.
+  function jumpAcvTo(retail) {
+    if (!Number.isFinite(retail)) return;
+    const s = currentSettings || DEFAULTS;
+    const feesExGross = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value);
+    grossUserEdited = false;
+    $("targetGross").value = grossForRetail(retail, s);
+    $("acv").value = Math.max(0, Math.round(retail - feesExGross - num($("targetGross").value))).toLocaleString("en-US");
+    acvUserEdited = true;
+    renderDealMath();
+  }
+
+  // Typing marks ACV as user-set so comp toggles won't overwrite it.
   $("acv").addEventListener("input", () => { acvUserEdited = true; renderDealMath(); });
   $("acv").addEventListener("blur", () => { $("acv").value = acvVal().toLocaleString("en-US"); });
   $("quick").addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b || !currentPricing) return;
     const map = { great: currentPricing.greatDealPrice, good: currentPricing.goodDealPrice, market: currentPricing.subjectImv };
-    const target = map[b.dataset.k];
-    if (!Number.isFinite(target)) return;
-    const costs = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value) + num($("targetGross").value);
-    $("acv").value = Math.max(0, Math.round(target - costs)).toLocaleString("en-US");
-    acvUserEdited = true;
-    renderDealMath();
+    jumpAcvTo(map[b.dataset.k]);
   });
+  // Clicking (or Enter/Space on) a ladder band jumps ACV to that price point.
+  const ladderJump = (e) => {
+    const seg = e.target.closest(".seg[data-retail]");
+    if (!seg || !currentPricing) return;
+    if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    jumpAcvTo(parseInt(seg.dataset.retail, 10));
+  };
+  $("ladderBar").addEventListener("click", ladderJump);
+  $("ladderBar").addEventListener("keydown", ladderJump);
 
-  // Deal math recomputes live; fee/title/target are saved as store defaults.
+  // Deal math recomputes live. Dealer/title fees are saved as store defaults;
+  // recon is per-vehicle; a hand-typed gross overrides the margin rule.
   ["recon", "dealerFee", "titleFee", "targetGross"].forEach((id) => {
     $(id).addEventListener("input", () => {
+      if (id === "targetGross") grossUserEdited = true;
       renderDealMath();
-      if (id !== "recon") persistDealDefaults();
+      if (id === "dealerFee" || id === "titleFee") persistDealDefaults();
     });
   });
 })();

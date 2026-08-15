@@ -81,7 +81,11 @@ html, body { margin: 0; }
 
 .ladder .ladder-scale{position:relative; padding-top:26px;}
 .ladder-bar{display:flex; height:26px; border-radius:8px; overflow:hidden; border:1px solid var(--border);}
-.ladder-bar .seg{display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden;}
+.ladder-bar .seg{display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; cursor:pointer; transition:filter .1s, box-shadow .1s;}
+.ladder-bar .seg:hover{filter:brightness(1.12);}
+.ladder-bar .seg:focus-visible{outline:none; box-shadow:inset 0 0 0 2px var(--bg);}
+.tap-hint{font-size:11px; color:var(--accent); font-weight:600; margin-top:8px;}
+.dm-hint{font-size:11px; color:var(--muted); margin:6px 0 0;}
 .ladder .marker{position:absolute; top:0; transform:translateX(-50%); text-align:center; transition:left .15s ease;}
 .ladder .marker .pill{font-size:10px; font-weight:800; color:var(--bg); background:var(--text); padding:2px 7px; border-radius:6px; white-space:nowrap; border:none;}
 .ladder .marker .stem{width:2px; height:8px; background:var(--text); margin:1px auto 0;}

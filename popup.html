@@ -114,6 +114,7 @@
         <div class="marker" id="marker"><div class="pill num" id="markerVal">—</div><div class="stem"></div></div>
       </div>
       <div class="ladder-ticks"><span class="num" id="tickLo"></span><span class="num" id="tickHi"></span></div>
+      <div class="tap-hint">👆 Tap any band above — or a button below — to set your ACV to that price point.</div>
       <div class="est-note">Estimated from this car's comp set — not an official CarGurus rating.</div>
     </div>
 
@@ -133,11 +134,12 @@
       <label>Recon $<input id="recon" type="number" inputmode="numeric" value="2500" /></label>
       <label>Dealer fee $<input id="dealerFee" type="number" inputmode="numeric" /></label>
       <label>Title fee $<input id="titleFee" type="number" inputmode="numeric" /></label>
-      <label class="key">Front-end gross $<input id="targetGross" type="number" inputmode="numeric" value="2500" /></label>
+      <label class="key">Front-end gross $<input id="targetGross" type="number" inputmode="numeric" value="2000" /></label>
     </div>
+    <p class="dm-hint">Gross auto-fills from your store's margin rule (Settings). Type over it to set your own.</p>
     <p id="feeWarn" class="fee-warn" hidden></p>
 
-    <div class="dm-sec">Or jump ACV to hit a rating</div>
+    <div class="dm-sec">Or click a rating to set ACV</div>
     <div class="quick" id="quick">
       <button type="button" data-k="great">Great Deal<small id="qGreat"></small></button>
       <button type="button" data-k="good">Good Deal<small id="qGood"></small></button>
