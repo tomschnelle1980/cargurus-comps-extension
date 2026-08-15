@@ -191,10 +191,16 @@ function readSubjectVehicle(selectors) {
     out.source = "heuristic";
   }
 
-  // 3) Mileage: look for "12,345 mi" / "Mileage: 12,345" / "Odometer".
+  // 3) Mileage. A number is either comma-grouped ("12,345") or a plain 2-6 digit
+  // run ("885", "12345") — the plain form MUST allow 2-3 digits so a nearly-new
+  // car's 3-digit odometer (e.g. 885) is read instead of falling through to a
+  // stray graph-axis number like "2,000". Prefer the labeled "Odometer:" /
+  // "Mileage:" value; only then fall back to a loose "N mi" match.
   const body = document.body ? document.body.innerText : "";
-  let m = body.match(/(?:odometer|mileage|miles)\D{0,12}([\d]{1,3}(?:,\d{3})+|\d{4,6})/i);
-  if (!m) m = body.match(/([\d]{1,3}(?:,\d{3})+|\d{4,6})\s*(?:mi\b|miles\b)/i);
+  const MI = "(\\d{1,3}(?:,\\d{3})+|\\d{2,6})";
+  let m = body.match(new RegExp("odometer[^\\d]{0,10}" + MI, "i"));
+  if (!m) m = body.match(new RegExp("mileage[^\\d]{0,10}" + MI, "i"));
+  if (!m) m = body.match(new RegExp(MI + "\\s*(?:mi\\b|miles\\b)", "i"));
   if (m) out.mileage = m[1].replace(/[^\d]/g, "");
 
   // 4) Body style from the vehicle heading — used to drop wrong body styles
