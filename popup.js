@@ -81,6 +81,11 @@ let subjectExtra = null;
 // The last search result (comps + competition + fallback flags), for the
 // market-speed, confidence, and buy-to-hit widgets.
 let currentResult = null;
+// Listings sitting this long are aspirational (overpriced) anchors; the user can
+// drop them from pricing with a toggle.
+const STALE_DAYS = 90;
+let excludeStale = false;
+const isStale = (c) => Number.isFinite(c.daysOnMarket) && c.daysOnMarket >= STALE_DAYS;
 // Raw listings scanned on the last search (shown in the match line).
 let lastScanned = 0;
 
@@ -440,6 +445,12 @@ function trimToKeys(v, preferExact) {
     const ex = base.filter((c) => c.exact);
     if (ex.length >= 3) base = ex;
   }
+  // Drop stale (long-sitting) listings from the priced set when the toggle is on,
+  // but never leave the selection empty.
+  if (excludeStale) {
+    const fresh = base.filter((c) => !isStale(c));
+    if (fresh.length) base = fresh;
+  }
   return new Set(base.map((c) => c._key));
 }
 
@@ -503,10 +514,43 @@ const medP = (nums) => {
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 };
 
-function computePricingLocal(comps) {
+// Ordinary-least-squares slope/intercept for y = slope·x + intercept.
+function linFit(pts) {
+  const n = pts.length;
+  if (n < 2) return null;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const p of pts) { sx += p.x; sy += p.y; sxx += p.x * p.x; sxy += p.x * p.y; }
+  const d = n * sxx - sx * sx;
+  if (!d) return null;
+  const slope = (n * sxy - sx * sy) / d;
+  return { slope, intercept: (sy - slope * sx) / n };
+}
+
+function computePricingLocal(comps, subjMiles) {
   const withImv = comps.filter((c) => Number.isFinite(c.expectedPrice) && c.expectedPrice > 0);
   const prices = comps.map((c) => c.price).filter(Number.isFinite);
-  const subjectImv = medP(withImv.map((c) => c.expectedPrice)) || medP(prices);
+  const rawImv = medP(withImv.map((c) => c.expectedPrice)) || medP(prices);
+
+  // Mileage-adjust the market value to THIS car's odometer: fit price-vs-mileage
+  // across the comps and shift the median by the subject's distance from the
+  // comps' median mileage. Guarded — needs ≥5 comps, a real (negative) slope,
+  // and a clamp so a thin/odd sample can't swing it wildly.
+  let subjectImv = rawImv, mileageAdjusted = false, perMile = null;
+  const milePts = comps
+    .filter((c) => Number.isFinite(c.mileage) && c.mileage > 0)
+    .map((c) => ({ x: c.mileage, y: (Number.isFinite(c.expectedPrice) && c.expectedPrice > 0) ? c.expectedPrice : c.price }))
+    .filter((p) => Number.isFinite(p.y) && p.y > 0);
+  if (rawImv && Number.isFinite(subjMiles) && subjMiles > 0 && milePts.length >= 5) {
+    const fit = linFit(milePts);
+    const midMiles = medP(milePts.map((p) => p.x));
+    if (fit && fit.slope < 0 && Number.isFinite(midMiles)) {
+      let adj = rawImv + fit.slope * (subjMiles - midMiles);
+      adj = Math.max(rawImv * 0.85, Math.min(rawImv * 1.15, adj)); // clamp ±15%
+      subjectImv = Math.round(adj);
+      mileageAdjusted = Math.abs(subjectImv - rawImv) >= 250; // only flag a meaningful shift
+      perMile = fit.slope;
+    }
+  }
 
   const ratioByRating = {};
   for (const c of withImv) {
@@ -523,6 +567,8 @@ function computePricingLocal(comps) {
   const doms = comps.map((c) => c.daysOnMarket).filter(Number.isFinite);
   return {
     subjectImv: subjectImv ? Math.round(subjectImv) : null,
+    rawImv: rawImv ? Math.round(rawImv) : null,
+    mileageAdjusted, perMile,
     goodDealPrice: subjectImv ? Math.round(subjectImv * goodRatio) : null,
     greatDealPrice: subjectImv ? Math.round(subjectImv * greatRatio) : null,
     medianDaysOnMarket: doms.length ? Math.round(medP(doms)) : null,
@@ -530,7 +576,8 @@ function computePricingLocal(comps) {
     lowAsking: prices.length ? Math.min(...prices) : null,
     highAsking: prices.length ? Math.max(...prices) : null,
     ratingCounts: comps.reduce((m, c) => { const l = RATING_LABEL_P[c.dealRating] || "No Analysis"; m[l] = (m[l] || 0) + 1; return m; }, {}),
-    basis: withImv.length
+    basis: withImv.length,
+    n: comps.length
   };
 }
 
@@ -572,7 +619,9 @@ function renderCompTable() {
       "<td class='num'>" + fmt$(c.price) + "</td>" +
       "<td class='num'>" + fmt$(c.expectedPrice) + "</td>" +
       "<td><span class='rating " + (c.dealRating || "") + "'>" + ratingLabel(c.dealRating) + "</span></td>" +
-      "<td class='num'>" + (Number.isFinite(c.daysOnMarket) ? c.daysOnMarket : "—") + "</td>" +
+      "<td class='num'>" + (Number.isFinite(c.daysOnMarket)
+        ? (isStale(c) ? "<span class='stale' title='On the market " + c.daysOnMarket + "+ days — likely overpriced'>" + c.daysOnMarket + "</span>" : c.daysOnMarket)
+        : "—") + "</td>" +
       "<td class='num'>" + (Number.isFinite(c.distance) ? c.distance + " mi" : "—") + "</td>" +
       "<td>" + (c.url ? "<a href='" + c.url + "' target='_blank' rel='noopener'>" + esc(c.dealer || c.city || "view") + "</a>" : esc(c.dealer || c.city || "—")) + "</td>";
     tb.appendChild(tr);
@@ -623,7 +672,8 @@ function applySelection(resetAcv) {
     renderDealMath();
     return;
   }
-  currentPricing = computePricingLocal(sel);
+  const subjMiles = currentSpec && Number.isFinite(currentSpec.mileage) ? currentSpec.mileage : num($("mileage").value);
+  currentPricing = computePricingLocal(sel, subjMiles);
   renderChips(currentPricing);
   if (note) note.innerHTML = "Pricing from <b>" + sel.length + "</b> of <b>" + displayedComps().length + "</b> shown comps.";
   // Re-seed the ACV to the Good-Deal buy on a fresh search, and on any selection
@@ -641,17 +691,43 @@ function applySelection(resetAcv) {
   renderDealMath();
 }
 
+// How much to trust the number: based on how many comps priced it and whether
+// the trim/year had to be widened. Returns {level, label, why}.
+function pricingConfidence(p) {
+  const n = p && Number.isFinite(p.n) ? p.n : 0;
+  const fb = currentResult && (currentResult.trimFallback || currentResult.yearFallback);
+  if (fb || n < 4) {
+    return { level: "low", label: "Low", why: fb ? "priced off other trims/years" : "only " + n + " comp" + (n === 1 ? "" : "s") };
+  }
+  if (n >= 8) return { level: "high", label: "High", why: n + " comps" };
+  return { level: "medium", label: "Medium", why: n + " comps" };
+}
+
 // Top summary chips (Market IMV, comp asking range, median ask, AVG DOL).
 function renderChips(p) {
   const el = $("chips");
   if (!el) return;
   if (!p || !Number.isFinite(p.subjectImv)) { el.innerHTML = ""; return; }
   const dol = Number.isFinite(p.medianDaysOnMarket) ? String(p.medianDaysOnMarket) : "—";
+  const conf = pricingConfidence(p);
+  const imvTitle = p.mileageAdjusted
+    ? "Adjusted to this car's mileage (raw market " + fmt$(p.rawImv) + ")"
+    : "CarGurus market value";
+  const imvTag = p.mileageAdjusted ? " <span class='chip-tag'>mi-adj</span>" : "";
   el.innerHTML =
-    "<span class='chip' title='CarGurus market value'>Market (IMV) <b>" + fmt$(p.subjectImv) + "</b></span>" +
+    "<span class='chip' title='" + esc(imvTitle) + "'>Market (IMV) <b>" + fmt$(p.subjectImv) + "</b>" + imvTag + "</span>" +
     "<span class='chip'>Comps asking <b>" + fmt$(p.lowAsking) + "–" + fmt$(p.highAsking) + "</b></span>" +
     "<span class='chip' title='Median comp asking price'>Median ask <b>" + fmt$(p.medianAsking) + "</b></span>" +
-    "<span class='chip' title='Average Days On Lot'>AVG DOL <b>" + dol + "</b></span>";
+    "<span class='chip' title='Average Days On Lot'>AVG DOL <b>" + dol + "</b></span>" +
+    "<span class='chip conf-" + conf.level + "' title='Based on " + esc(conf.why) + "'>Confidence <b>" + conf.label + "</b></span>";
+}
+
+// Market-speed label from days-to-turn (Inventory Plus' own metric).
+function speedTag(turnDays) {
+  if (!Number.isFinite(turnDays) || turnDays <= 0) return null;
+  if (turnDays <= 30) return { label: "🔥 Hot", cls: "hot" };
+  if (turnDays <= 60) return { label: "Balanced", cls: "warm" };
+  return { label: "🐢 Slow", cls: "slow" };
 }
 
 // Inventory Plus market panel (target price, sold/mo, days-to-turn).
@@ -659,17 +735,26 @@ function renderIpx() {
   const el = $("ipx");
   if (!el) return;
   const x = subjectExtra || {};
-  if (!(x.target || x.turn || x.volume)) { el.hidden = true; return; }
+  const reconN = parseInt(String(x.recon || "").replace(/[^\d]/g, ""), 10);
+  const hasRecon = Number.isFinite(reconN) && reconN > 0;
+  if (!(x.target || x.turn || x.volume || hasRecon)) { el.hidden = true; return; }
   el.hidden = false;
   const tgt = (x.target && !/^\s*(n\/?a|—|-)\s*$/i.test(x.target)) ? x.target : null;
   const mkt = x.market ? " <span class='src'>· " + esc(x.market) + "</span>" : "";
+  const turnN = parseInt(String(x.turn || "").replace(/[^\d]/g, ""), 10);
+  const spd = speedTag(turnN);
+  const reconTile = hasRecon
+    ? "<div class='ipx-stat'><div class='ipx-v'>$" + fmtN(reconN) + "</div><div class='ipx-k'>Recon (carried in)</div></div>"
+    : "";
   el.innerHTML =
-    "<div class='ipx-h'>From Inventory Plus" + mkt + "</div>" +
+    "<div class='ipx-h'>From Inventory Plus" + mkt +
+      (spd ? " <span class='spd " + spd.cls + "'>" + spd.label + "</span>" : "") + "</div>" +
     "<div class='ipx-grid'>" +
       "<div class='ipx-stat'><div class='ipx-v" + (tgt ? "" : " empty") + "'>" + (tgt ? esc(tgt) : "—") + "</div>" +
         "<div class='ipx-k'>Inventory+ Target" + (tgt ? "" : "<span>not set · rare car</span>") + "</div></div>" +
       "<div class='ipx-stat'><div class='ipx-v'>" + esc(x.volume || "—") + "<span class='u'>/mo</span></div><div class='ipx-k'>Sold in market</div></div>" +
       "<div class='ipx-stat'><div class='ipx-v'>" + esc(x.turn || "—") + "<span class='u'> days</span></div><div class='ipx-k'>Avg to turn</div></div>" +
+      reconTile +
     "</div>";
 }
 
@@ -761,10 +846,21 @@ function renderMarket(result) {
   if (!comp) { el.innerHTML = ""; return; }
   const widened = result.usedRadius > comp.radius;
   const notes = (result.widenNotes || []);
+  // Months of supply = comps for sale locally ÷ units sold/month (Inventory Plus).
+  // Only meaningful for a bounded radius, so skip it for a nationwide search.
+  let supply = "";
+  const vol = subjectExtra ? parseInt(String(subjectExtra.volume || "").replace(/[^\d]/g, ""), 10) : NaN;
+  if (Number.isFinite(vol) && vol > 0 && comp.withinRadius > 0 && comp.radius < NATIONWIDE_MI) {
+    const mo = comp.withinRadius / vol;
+    const tag = mo <= 1.5 ? ["🔥 hot", "hot"] : mo <= 3 ? ["balanced", "warm"] : ["🐢 slow", "slow"];
+    supply = "<br><span class='supply " + tag[1] + "'>~" + (mo < 1 ? mo.toFixed(1) : Math.round(mo * 10) / 10) +
+      " months' supply (" + comp.withinRadius + " for sale ÷ " + vol + " sold/mo) · " + tag[0] + " market</span>";
+  }
   el.innerHTML =
     "<b>Competition:</b> " + comp.withinRadius + " comparable unit" + (comp.withinRadius === 1 ? "" : "s") +
     " for sale within " + radLabel(comp.radius) +
     (widened ? " · expanded to <b>" + radLabel(result.usedRadius) + "</b> to reach " + result.counts.used + " comps" : "") +
+    supply +
     (buckets.length ? "<br><span class='buckets'>" + buckets.map((b) => b.mi + " mi: <b>" + b.count + "</b>").join(" · ") + "</span>" : "") +
     (notes.length ? "<br><span class='widen'>⚠ Widened: " + notes.map(esc).join(" · ") + "</span>" : "");
 }
@@ -860,10 +956,21 @@ function renderDealMath() {
     "<div class='dm-row profit'><div class='k'><span class='dot' style='background:var(--profit)'></span>Front-end gross <small>profit</small></div><div class='v'><span class='plus'>+</span>" + fmt$(gross) + "</div></div>" +
     "<div class='dm-row total'><div class='k'>Retail sale price</div><div class='v'>" + fmt$(sale) + "</div></div>";
 
-  // quick-jump button sublabels
-  if ($("qGreat")) $("qGreat").textContent = "list " + fmt$(greatCeil);
-  if ($("qGood")) $("qGood").textContent = "list " + fmt$(goodCeil);
-  if ($("qMarket")) $("qMarket").textContent = "list " + fmt$(imv);
+  // Buy-to-hit: each rating button shows the ACV you'd have to buy at (backing
+  // out fees + the rule gross) to LIST at that price — the whole buy range at a
+  // glance.
+  const feesExGross = recon + title + dealer;
+  const buyFor = (retail) => Math.max(0, Math.round(retail - feesExGross - grossForRetail(retail, currentSettings || DEFAULTS)));
+  if ($("qGreat")) $("qGreat").textContent = "buy " + fmt$(buyFor(greatCeil)) + " · list " + fmt$(greatCeil);
+  if ($("qGood")) $("qGood").textContent = "buy " + fmt$(buyFor(goodCeil)) + " · list " + fmt$(goodCeil);
+  if ($("qMarket")) $("qMarket").textContent = "buy " + fmt$(buyFor(imv)) + " · list " + fmt$(imv);
+
+  // Listing-friendly rounded retail suggestion (ends in 95).
+  const ls = $("listSuggest");
+  if (ls) {
+    const nice = sale > 1000 ? Math.round(sale / 500) * 500 - 5 : sale;
+    ls.textContent = nice > 0 && Math.abs(nice - sale) >= 5 ? "list ≈ " + fmt$(nice) : "";
+  }
 }
 
 function num(v) { const n = parseInt(String(v).replace(/[^\d-]/g, ""), 10); return Number.isFinite(n) ? n : 0; }
@@ -1103,6 +1210,15 @@ async function persistDealDefaults() {
     renderCompTable();
     updateMatchline();
     applySelection(true);
+  });
+
+  // Stale-listing toggle: drop 90+ day listings from the priced set.
+  const staleBox = $("excludeStale");
+  if (staleBox) staleBox.addEventListener("change", () => {
+    excludeStale = staleBox.checked;
+    selectedKeys = trimToKeys(($("trimFilter") && $("trimFilter").value) || "*ALL*", true);
+    renderCompTable();
+    applySelection(false);
   });
 
   // Deal-math build-up: ACV is editable; the tier buttons and the ladder bands
