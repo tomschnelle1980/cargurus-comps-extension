@@ -116,9 +116,13 @@ async function init() {
   const subjectLine = [s.year, s.make, s.model, s.trim].filter(Boolean).join(" ");
   $("subject").textContent = subjectLine +
     (Number.isFinite(s.mileage) ? " · " + fmtN(s.mileage) + " miles" : "");
+  const rad = printData.radius || 500;
+  const radTxt = rad >= 5000 ? "nationwide" : "within " + rad + " miles" + (printData.zip ? " of " + printData.zip : "");
+  const mileTxt = (Number.isFinite(printData.mileageLo) && Number.isFinite(printData.mileageHi))
+    ? " · " + fmtN(printData.mileageLo) + "–" + fmtN(printData.mileageHi) + " miles"
+    : "";
   $("meta").textContent =
-    "Comparable units for sale within " + (printData.radius || 500) + " miles" +
-    (printData.zip ? " of " + printData.zip : "") + " · " + formatDate() + " · Source: CarGurus.com";
+    "Comparable units for sale " + radTxt + mileTxt + " · " + formatDate() + " · Source: CarGurus.com";
   $("footer").textContent =
     "Actual retail listings for comparable vehicles. Prices, mileage, and availability shown as listed on " +
     "CarGurus.com as of " + formatDate() + " and are subject to change.";

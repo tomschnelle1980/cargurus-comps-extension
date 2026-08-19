@@ -1151,6 +1151,44 @@ async function findComps() {
   }
 }
 
+// Build the printable comp pool: the SAME comps you're looking at, but hard-
+// filtered to a mileage window around the subject and sorted by closest mileage
+// (then nearest, then cheapest) — so the handout shows genuinely similar cars,
+// not the cheapest high-mileage ones. Widens the window only if too few qualify.
+function buildPrintPool(comps, spec) {
+  const subj = Number.isFinite(spec.mileage) ? spec.mileage : null;
+  // Prefer the priced trim so the handout isn't a mix of trims.
+  let pool = spec.trim ? comps.filter((c) => c.trimMatched) : comps.slice();
+  if (pool.length < 4) pool = comps.slice();
+
+  // Start from the mileage slider window (or ±10k around the subject if the
+  // slider is wide open). Widen symmetrically only until we have a usable count.
+  const wideOpen = !(Number.isFinite(spec.minMileage) && Number.isFinite(spec.maxMileage)) ||
+    (spec.minMileage <= 0 && spec.maxMileage >= 200000);
+  let lo = wideOpen ? (subj != null ? Math.max(0, subj - 10000) : 0) : spec.minMileage;
+  let hi = wideOpen ? (subj != null ? subj + 10000 : Infinity) : spec.maxMileage;
+  const half = Math.max(2500, Math.round((hi - lo) / 2));
+  const near = (c) => (subj == null || !Number.isFinite(c.mileage)) ? Infinity : Math.abs(c.mileage - subj);
+  const inWin = (c, l, h) => !Number.isFinite(c.mileage) || (c.mileage >= l && c.mileage <= h);
+
+  let chosen = pool, wlo = lo, whi = hi, widened = 0;
+  if (subj != null) {
+    for (let step = 0; step <= 3; step++) {
+      wlo = Math.max(0, lo - half * step);
+      whi = hi + half * step;
+      const within = pool.filter((c) => inWin(c, wlo, whi));
+      chosen = within; widened = step;
+      if (within.length >= 6) break;
+    }
+  }
+  chosen = chosen.slice().sort((a, b) =>
+    (near(a) - near(b)) ||                     // closest mileage first
+    ((a.distance || 0) - (b.distance || 0)) || // then nearest
+    ((a.price || 0) - (b.price || 0))          // then cheapest
+  ).slice(0, 24);
+  return { list: chosen, lo: Math.round(wlo), hi: Number.isFinite(whi) ? Math.round(whi) : null, widened };
+}
+
 async function printComps() {
   const spec = gatherSpec();
   const problem = validate(spec);
@@ -1161,20 +1199,30 @@ async function printComps() {
   const status = $("printStatus");
   btn.disabled = true;
 
-  // Force a 500-mi search and a big pool so we surface the truly cheapest comps.
-  const printSpec = Object.assign({}, spec, { radius: 500, targetCount: 40 });
-
   try {
-    const result = await searchComps(printSpec, (m) => { status.textContent = m; });
-    if (!result || !result.ok) { status.textContent = (result && result.error) || "Search failed."; return; }
-    const cheapest = (result.cheapest || []).slice(0, 24);
-    if (!cheapest.length) { status.textContent = "No comparable listings found."; return; }
+    // Print the comps you're already looking at (they honor your radius, trim,
+    // and mileage window). Only run a fresh search if you haven't found comps yet.
+    let comps = (currentComps && currentComps.length) ? currentComps.slice() : null;
+    let radiusUsed = (currentResult && currentResult.usedRadius) || spec.radius;
+    if (!comps) {
+      status.textContent = "Searching…";
+      const result = await searchComps(Object.assign({}, spec, { targetCount: 40 }), (m) => { status.textContent = m; });
+      if (!result || !result.ok) { status.textContent = (result && result.error) || "Search failed."; return; }
+      comps = (result.comps || []).slice();
+      radiusUsed = result.usedRadius || spec.radius;
+    }
+
+    const { list, lo, hi, widened } = buildPrintPool(comps, spec);
+    if (!list.length) { status.textContent = "No comparable listings found."; return; }
     await chrome.storage.local.set({
       printData: {
         subject: { year: spec.year, make: spec.make, model: spec.model, trim: spec.trim, mileage: spec.mileage },
         zip: spec.zip,
-        radius: 500,
-        comps: cheapest,
+        radius: radiusUsed,
+        mileageLo: lo,
+        mileageHi: hi,
+        mileageWidened: widened > 0,
+        comps: list,
         theme: document.documentElement.getAttribute("data-theme") || "auto"
       }
     });
