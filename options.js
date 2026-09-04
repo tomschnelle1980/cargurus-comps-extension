@@ -13,6 +13,7 @@ async function load() {
   $("margin30").value = Number.isFinite(settings.margin30) ? settings.margin30 : 10;
   $("margin50").value = Number.isFinite(settings.margin50) ? settings.margin50 : 8;
   $("margin80").value = Number.isFinite(settings.margin80) ? settings.margin80 : 7;
+  $("wholesalePct").value = Number.isFinite(settings.wholesalePct) ? settings.wholesalePct : 85;
   const sel = settings.selectors || {};
   $("selYear").value = sel.year || "";
   $("selMake").value = sel.make || "";
@@ -34,6 +35,7 @@ async function save() {
     margin30: parseFloat($("margin30").value) || 10,
     margin50: parseFloat($("margin50").value) || 8,
     margin80: parseFloat($("margin80").value) || 7,
+    wholesalePct: parseFloat($("wholesalePct").value) || 85,
     selectors: {
       year: $("selYear").value.trim(),
       make: $("selMake").value.trim(),

@@ -258,6 +258,11 @@ label.chk input { width: auto; }
 .warn-banner{background:color-mix(in srgb, var(--high) 14%, var(--bg)); border:1px solid color-mix(in srgb, var(--high) 45%, var(--border)); border-radius:11px; padding:10px 13px; margin:10px 0 4px; font-size:12.5px; line-height:1.45; color:var(--text);}
 .warn-banner .wb-row + .wb-row{margin-top:7px;}
 .warn-banner b{color:var(--high);}
+.auction{margin-top:10px; border-radius:11px; padding:9px 13px; font-size:13px; line-height:1.4;}
+.auction.ok{background:color-mix(in srgb, var(--good) 12%, var(--bg)); border:1px solid color-mix(in srgb, var(--good) 45%, var(--border)); color:var(--text);}
+.auction.ok b{color:var(--good); font-size:16px; font-variant-numeric:tabular-nums;}
+.auction .sub{color:var(--muted); font-size:11px; margin-left:6px;}
+.auction.warn{background:color-mix(in srgb, var(--high) 12%, var(--bg)); border:1px solid color-mix(in srgb, var(--high) 40%, var(--border)); color:var(--muted); font-size:12px;}
 .market .buckets { display: inline-block; margin-top: 3px; }
 .market .widen { display: inline-block; margin-top: 3px; color: var(--high, #b26a00); font-weight: 600; }
 .market .supply { display:inline-block; margin-top:3px; font-weight:600; }

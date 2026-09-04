@@ -13,7 +13,9 @@ const DEFAULTS = {
   dealerFee: "", titleFee: "", targetGross: 2500, reconDefault: 2500, theme: "auto",
   // Gross-profit rule: a floor plus a margin (% of retail) by retail-price band.
   // Editable per store in Settings.
-  minGross: 2000, margin30: 10, margin50: 8, margin80: 7
+  minGross: 2000, margin30: 10, margin50: 8, margin80: 7,
+  // Wholesale: auction value as a % of Manheim MMR (post-fee rule of thumb).
+  wholesalePct: 85
 };
 
 // Front-end gross rule. Margin is a percent of the retail (sale) price; the band
@@ -104,7 +106,8 @@ function readSubjectVehicle(selectors) {
   const bySel = (sel) => { try { return sel ? txt(document.querySelector(sel)) : ""; } catch (e) { return ""; } };
 
   const out = { year: "", make: "", model: "", trim: "", mileage: "", bodyStyle: "",
-                target: "", turn: "", volume: "", market: "", recon: "", source: "none", candidates: [] };
+                target: "", turn: "", volume: "", market: "", recon: "",
+                mmr: "", mmrLow: "", mmrHigh: "", source: "none", candidates: [] };
 
   // Body style from a piece of text (convertible=cabriolet=roadster, etc.).
   const detectBody = (s) => {
@@ -275,6 +278,42 @@ function readSubjectVehicle(selectors) {
     }
   } catch (e) { /* ignore */ }
 
+  // 7) Manheim Market Report (wholesale value). Read the "Adjusted MMR" dollar
+  // amount and the "Typical Range", scanning for the labels and the $ beside them.
+  try {
+    const dollarsIn = (s) => {
+      const out2 = []; const re = /\$\s*([\d]{1,3}(?:,\d{3})+|\d{3,6})/g; let mm;
+      while ((mm = re.exec(String(s || "")))) out2.push(mm[1].replace(/[^\d]/g, ""));
+      return out2;
+    };
+    const nearbyDollar = (el) => {
+      let sib = el.nextElementSibling;
+      for (let i = 0; i < 4 && sib; i++) { const d = dollarsIn(sib.textContent); if (d.length) return d[0]; sib = sib.nextElementSibling; }
+      let p = el.parentElement;
+      for (let i = 0; i < 3 && p; i++) { const d = dollarsIn(p.textContent); if (d.length) return d[0]; p = p.parentElement; }
+      return "";
+    };
+    const ownText = (el) => Array.from(el.childNodes).filter((n) => n.nodeType === 3)
+      .map((n) => n.textContent).join(" ").replace(/\s+/g, " ").trim();
+    const nodes = Array.from(document.querySelectorAll("label,span,div,td,th,p,strong,b"));
+    for (const el of nodes) {
+      const t = ownText(el);
+      if (!out.mmr && /adjusted\s*mmr/i.test(t)) { const d = nearbyDollar(el); if (d) out.mmr = d; }
+      if (!out.mmrLow && /typical\s*range/i.test(t)) {
+        const scope = el.parentElement || el;
+        const d = dollarsIn(scope.textContent);
+        if (d.length >= 2) { out.mmrLow = d[0]; out.mmrHigh = d[1]; }
+      }
+      if (out.mmr && out.mmrLow) break;
+    }
+    // Fallback: a plain "MMR" label if "Adjusted MMR" wasn't found.
+    if (!out.mmr) {
+      for (const el of nodes) {
+        if (/^\s*mmr\s*:?\s*$/i.test(ownText(el))) { const d = nearbyDollar(el); if (d) { out.mmr = d; break; } }
+      }
+    }
+  } catch (e) { /* ignore */ }
+
   return out;
 }
 
@@ -358,16 +397,17 @@ async function readActiveTab(settings, opts = {}) {
       args: [settings.selectors || {}]
     });
     const v = { year: "", make: "", model: "", trim: "", mileage: "", bodyStyle: "",
-                target: "", turn: "", volume: "", market: "", recon: "", source: "none" };
+                target: "", turn: "", volume: "", market: "", recon: "", mmr: "", mmrLow: "", mmrHigh: "", source: "none" };
     for (const r of (results || [])) {
       const o = r && r.result;
       if (!o) continue;
-      ["year", "make", "model", "trim", "mileage", "bodyStyle", "target", "turn", "volume", "market", "recon"].forEach((k) => {
+      ["year", "make", "model", "trim", "mileage", "bodyStyle", "target", "turn", "volume", "market", "recon", "mmr", "mmrLow", "mmrHigh"].forEach((k) => {
         if (!v[k] && o[k]) v[k] = o[k];
       });
       if (v.source === "none" && o.source && o.source !== "none") v.source = o.source;
     }
-    subjectExtra = { target: v.target, turn: v.turn, volume: v.volume, market: v.market, recon: v.recon };
+    subjectExtra = { target: v.target, turn: v.turn, volume: v.volume, market: v.market, recon: v.recon,
+                     mmr: v.mmr, mmrLow: v.mmrLow, mmrHigh: v.mmrHigh };
 
     if (v.year) $("year").value = v.year;
     if (v.make) $("make").value = v.make;
@@ -382,6 +422,9 @@ async function readActiveTab(settings, opts = {}) {
     const pageRecon = parseInt(String(v.recon).replace(/[^\d]/g, ""), 10);
     const defRecon = Number.isFinite(settings.reconDefault) ? settings.reconDefault : 2500;
     $("recon").value = Number.isFinite(pageRecon) && pageRecon > 0 ? pageRecon : defRecon;
+
+    // Wholesale/auction value from Manheim MMR (if the page has it).
+    renderWholesale();
 
     if (v.source === "selectors" || v.source === "heuristic") {
       status.textContent = "Read from page ✓";
@@ -728,6 +771,27 @@ function renderChips(p) {
     "<span class='chip conf-" + conf.level + "' title='Based on " + esc(conf.why) + "'>Confidence <b>" + conf.label + "</b></span>";
 }
 
+// Wholesale unit: when checked, show the auction value = a % of Manheim MMR
+// (default 85%, set in Settings), read off the Inventory Plus MMR panel.
+function renderWholesale() {
+  const box = $("wholesaleUnit"), out = $("auctionVal");
+  if (!box || !out) return;
+  if (!box.checked) { out.hidden = true; out.innerHTML = ""; return; }
+  out.hidden = false;
+  const x = subjectExtra || {};
+  const mmr = parseInt(String(x.mmr || "").replace(/[^\d]/g, ""), 10);
+  const pct = Number.isFinite((currentSettings || DEFAULTS).wholesalePct) ? (currentSettings || DEFAULTS).wholesalePct : 85;
+  if (Number.isFinite(mmr) && mmr > 0) {
+    const auction = Math.round(mmr * pct / 100);
+    out.className = "auction ok";
+    out.innerHTML = "Auction value <b>" + fmt$(auction) + "</b> " +
+      "<span class='sub'>" + pct + "% of MMR " + fmt$(mmr) + "</span>";
+  } else {
+    out.className = "auction warn";
+    out.innerHTML = "No Manheim MMR found on this page — open the MMR panel in Inventory Plus and re-read.";
+  }
+}
+
 // Market-speed label from days-to-turn (Inventory Plus' own metric).
 function speedTag(turnDays) {
   if (!Number.isFinite(turnDays) || turnDays <= 0) return null;
@@ -743,7 +807,9 @@ function renderIpx() {
   const x = subjectExtra || {};
   const reconN = parseInt(String(x.recon || "").replace(/[^\d]/g, ""), 10);
   const hasRecon = Number.isFinite(reconN) && reconN > 0;
-  if (!(x.target || x.turn || x.volume || hasRecon)) { el.hidden = true; return; }
+  const mmrN = parseInt(String(x.mmr || "").replace(/[^\d]/g, ""), 10);
+  const hasMmr = Number.isFinite(mmrN) && mmrN > 0;
+  if (!(x.target || x.turn || x.volume || hasRecon || hasMmr)) { el.hidden = true; return; }
   el.hidden = false;
   const tgt = (x.target && !/^\s*(n\/?a|—|-)\s*$/i.test(x.target)) ? x.target : null;
   const mkt = x.market ? " <span class='src'>· " + esc(x.market) + "</span>" : "";
@@ -751,6 +817,9 @@ function renderIpx() {
   const spd = speedTag(turnN);
   const reconTile = hasRecon
     ? "<div class='ipx-stat'><div class='ipx-v'>$" + fmtN(reconN) + "</div><div class='ipx-k'>Recon (carried in)</div></div>"
+    : "";
+  const mmrTile = hasMmr
+    ? "<div class='ipx-stat'><div class='ipx-v'>$" + fmtN(mmrN) + "</div><div class='ipx-k'>Manheim MMR</div></div>"
     : "";
   el.innerHTML =
     "<div class='ipx-h'>From Inventory Plus" + mkt +
@@ -760,7 +829,7 @@ function renderIpx() {
         "<div class='ipx-k'>Inventory+ Target" + (tgt ? "" : "<span>not set · rare car</span>") + "</div></div>" +
       "<div class='ipx-stat'><div class='ipx-v'>" + esc(x.volume || "—") + "<span class='u'>/mo</span></div><div class='ipx-k'>Sold in market</div></div>" +
       "<div class='ipx-stat'><div class='ipx-v'>" + esc(x.turn || "—") + "<span class='u'> days</span></div><div class='ipx-k'>Avg to turn</div></div>" +
-      reconTile +
+      reconTile + mmrTile +
     "</div>";
 }
 
@@ -1257,6 +1326,9 @@ async function persistDealDefaults() {
   $("readBtn").addEventListener("click", () => readActiveTab(currentSettings || DEFAULTS, { manual: true }));
   // Editing the subject mileage recenters the range window (±15k default).
   $("mileage").addEventListener("change", () => centerMileageWindow($("mileage").value));
+
+  // Wholesale unit: toggle the auction-value (85% of MMR) readout.
+  if ($("wholesaleUnit")) $("wholesaleUnit").addEventListener("change", renderWholesale);
 
   // Trim filter: show only that trim's comps in the table and price against them.
   $("trimFilter").addEventListener("change", () => {

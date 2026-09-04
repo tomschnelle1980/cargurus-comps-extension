@@ -89,6 +89,15 @@
   </div>
 
   <div class="card" style="margin-top:16px">
+    <h2>Wholesale / auction</h2>
+    <p class="hint">For a unit headed to auction, checking “Wholesale unit” in the popup shows an auction value from the Manheim MMR read off Inventory Plus.</p>
+    <div class="row">
+      <label for="wholesalePct">Auction % of MMR</label>
+      <div><input id="wholesalePct" inputmode="decimal" placeholder="85" /><div class="hint">Auction value = this % of Adjusted MMR (default 85% — the post-fee net that most cars bring).</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
     <h2>Inventory Plus field mapping <span class="hint">(optional)</span></h2>
     <p class="hint">The extension already tries to auto-read the vehicle. If your Inventory Plus layout isn't picked up reliably, paste CSS selectors for each field here to lock it in.
       <details><summary>How to find a selector</summary>
