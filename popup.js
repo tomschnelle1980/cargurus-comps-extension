@@ -75,9 +75,11 @@ let currentPricing = null;
 // True once the user types/jumps their own ACV, so selection changes stop
 // re-seeding it. Reset on each new search.
 let acvUserEdited = false;
-// True once the user types their own front-end gross, so the margin rule stops
-// auto-filling it. Reset on each new search.
-let grossUserEdited = false;
+// The retail sale price is LOCKED to the rating you pick (a tier/ladder click or
+// the Good-Deal seed). While locked, changing ACV or costs comes out of the
+// front-end gross instead of moving the sale price. Typing a gross clears the
+// lock (sale then floats = ACV + costs + gross). null = not locked.
+let lockedSale = null;
 // Inventory Plus market data (TrueScore Market + TrueTarget) read off the page.
 let subjectExtra = null;
 // The last search result (comps + competition + fallback flags), for the
@@ -725,17 +727,16 @@ function applySelection(resetAcv) {
   currentPricing = computePricingLocal(sel, subjMiles);
   renderChips(currentPricing);
   if (note) note.innerHTML = "Pricing from <b>" + sel.length + "</b> of <b>" + displayedComps().length + "</b> shown comps.";
-  // Re-seed the ACV to the Good-Deal buy on a fresh search, and on any selection
-  // change UNLESS the user has typed/jumped their own ACV (then keep theirs). The
-  // gross for that retail comes from the store's margin rule.
-  if (resetAcv) { acvUserEdited = false; grossUserEdited = false; }
+  // Re-seed on a fresh search, and on any selection change UNLESS the user has
+  // taken control of the ACV. Lock the sale to the Good-Deal price; the ACV is
+  // seeded so the gross equals the store's margin rule at that price.
+  if (resetAcv) acvUserEdited = false;
   if ((resetAcv || !acvUserEdited) && Number.isFinite(currentPricing.goodDealPrice)) {
     const s = currentSettings || DEFAULTS;
-    const retail = currentPricing.goodDealPrice;
+    lockedSale = currentPricing.goodDealPrice;
     const feesExGross = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value);
-    if (!grossUserEdited) $("targetGross").value = grossForRetail(retail, s);
-    const gross = num($("targetGross").value);
-    $("acv").value = Math.max(0, Math.round(retail - feesExGross - gross)).toLocaleString("en-US");
+    const gross = grossForRetail(lockedSale, s);
+    $("acv").value = Math.max(0, Math.round(lockedSale - feesExGross - gross)).toLocaleString("en-US");
   }
   renderDealMath();
 }
@@ -945,22 +946,21 @@ const acvVal = () => num($("acv").value);
 // The ACV build-up: from the ACV you type, add costs + gross to get the retail
 // price, classify its estimated CarGurus tier, and draw the ladder / bar / receipt.
 function renderDealMath() {
-  // Remind the user to set store fees (they are $0 until entered).
-  const warn = $("feeWarn");
-  if (warn) {
-    const missing = [];
-    if (!$("dealerFee").value.trim()) missing.push("dealer fee");
-    if (!$("titleFee").value.trim()) missing.push("title fee");
-    if (missing.length) {
-      warn.textContent = "⚠ Your " + missing.join(" and ") + " " + (missing.length > 1 ? "are" : "is") +
-        " blank ($0). Set " + (missing.length > 1 ? "them" : "it") + " here or in Settings — saved once, they stick.";
-      warn.hidden = false;
-    } else { warn.hidden = true; }
-  }
+  // Store-fee reminder (fees are $0 until entered); the gross-health warning
+  // below can override it once we know the gross.
+  const missing = [];
+  if (!$("dealerFee").value.trim()) missing.push("dealer fee");
+  if (!$("titleFee").value.trim()) missing.push("title fee");
+  const feeMsg = missing.length
+    ? "⚠ Your " + missing.join(" and ") + " " + (missing.length > 1 ? "are" : "is") +
+      " blank ($0). Set " + (missing.length > 1 ? "them" : "it") + " here or in Settings — saved once, they stick."
+    : "";
 
+  const warn = $("feeWarn");
   const badge = $("tier"), saleOut = $("saleOut");
   const p = currentPricing;
   if (!p || !Number.isFinite(p.subjectImv)) {
+    if (warn) { warn.hidden = !feeMsg; warn.className = "fee-warn"; warn.textContent = feeMsg; }
     if (badge) { badge.textContent = "—"; badge.style.removeProperty("--tc"); }
     if (saleOut) saleOut.textContent = "—";
     $("buildBar").innerHTML = ""; $("receipt").innerHTML = "";
@@ -971,16 +971,42 @@ function renderDealMath() {
 
   const recon = num($("recon").value), dealer = num($("dealerFee").value), title = num($("titleFee").value);
   const acv = acvVal();
-  // Front-end gross: the store's margin rule fills it from the retail price
-  // (floored at the minimum) unless the user has typed their own gross.
-  let gross;
-  if (grossUserEdited) {
-    gross = num($("targetGross").value);
+  // Two modes:
+  //  • Locked (default after picking a rating): the retail sale price is FIXED,
+  //    so changing ACV or costs comes out of the front-end gross — put more into
+  //    the car and you keep the same sale price, just less profit.
+  //  • Manual gross (after you type a gross): the sale price floats = ACV + costs
+  //    + your gross.
+  let gross, sale;
+  if (lockedSale != null) {
+    sale = lockedSale;
+    gross = sale - acv - recon - title - dealer; // gross absorbs the difference
+    $("targetGross").value = gross;               // reflect the derived gross
   } else {
-    gross = ruleGross(acv + recon + title + dealer, currentSettings || DEFAULTS);
-    $("targetGross").value = gross;
+    gross = num($("targetGross").value);
+    sale = acv + recon + title + dealer + gross;
   }
-  const sale = acv + recon + title + dealer + gross;
+
+  // Gross health: warn when holding this sale leaves too little (or negative)
+  // profit — this is the whole point of the locked-sale view.
+  const minG = minGrossOf(currentSettings || DEFAULTS);
+  if (warn) {
+    let msg = "", cls = "fee-warn";
+    if (gross < 0) {
+      msg = "⚠ Upside down by " + fmt$(-gross) + " to hold this " + fmt$(sale) +
+        " sale price. Lower the ACV, or type your own gross to let the price float.";
+      cls = "fee-warn loss";
+    } else if (gross < minG) {
+      msg = "⚠ Only " + fmt$(gross) + " gross at this ACV — below your " + fmt$(minG) +
+        " minimum. Lower the ACV to make more, or accept the thinner deal.";
+      cls = "fee-warn loss";
+    } else {
+      msg = feeMsg;
+    }
+    warn.className = cls;
+    warn.textContent = msg;
+    warn.hidden = !msg;
+  }
 
   const imv = p.subjectImv;
   const greatCeil = Number.isFinite(p.greatDealPrice) ? p.greatDealPrice : Math.round(imv * 0.94);
@@ -1013,14 +1039,19 @@ function renderDealMath() {
   const pct = Math.max(0, Math.min(100, (sale - LMIN) / span * 100));
   $("marker").style.left = pct + "%"; $("markerVal").textContent = fmt$(sale);
 
-  // build-up bar (proportions of the retail price)
-  const denom = sale > 0 ? sale : 1;
+  // build-up bar (proportions of the retail price). When gross is negative the
+  // costs exceed the sale price, so scale by the larger of the two to avoid an
+  // overflowing bar.
+  const denom = Math.max(sale, acv + recon + title + dealer, 1);
   const parts = [["var(--acv)", acv, "ACV"], ["#c07f2e", recon, "Recon"], ["#9a6b3a", title, "Title"],
                  ["#7a684a", dealer, "Fee"], ["var(--profit)", gross, "Profit"]];
   $("buildBar").innerHTML = parts.map(([col, v, lab]) => {
     const w = Math.max(0, v) / denom * 100;
     return "<span style='width:" + w + "%;background:" + col + "'>" + (w > 11 ? fmt$(v) : (w > 6 ? lab : "")) + "</span>";
   }).join("");
+  const grossRow = gross < 0
+    ? "<div class='v loss'>" + fmt$(gross) + "</div>"
+    : "<div class='v'><span class='plus'>+</span>" + fmt$(gross) + "</div>";
 
   // receipt
   $("receipt").innerHTML =
@@ -1028,7 +1059,7 @@ function renderDealMath() {
     "<div class='dm-row cost'><div class='k'><span class='dot' style='background:#c07f2e'></span>Reconditioning</div><div class='v'><span class='plus'>+</span>" + fmt$(recon) + "</div></div>" +
     "<div class='dm-row cost'><div class='k'><span class='dot' style='background:#9a6b3a'></span>Title fee</div><div class='v'><span class='plus'>+</span>" + fmt$(title) + "</div></div>" +
     "<div class='dm-row cost'><div class='k'><span class='dot' style='background:#7a684a'></span>Dealer / doc fee</div><div class='v'><span class='plus'>+</span>" + fmt$(dealer) + "</div></div>" +
-    "<div class='dm-row profit'><div class='k'><span class='dot' style='background:var(--profit)'></span>Front-end gross <small>profit</small></div><div class='v'><span class='plus'>+</span>" + fmt$(gross) + "</div></div>" +
+    "<div class='dm-row profit'><div class='k'><span class='dot' style='background:var(--profit)'></span>Front-end gross <small>" + (gross < 0 ? "loss" : "profit") + "</small></div>" + grossRow + "</div>" +
     "<div class='dm-row total'><div class='k'>Retail sale price</div><div class='v'>" + fmt$(sale) + "</div></div>";
 
   // Buy-to-hit: each rating button shows the ACV you'd have to buy at (backing
@@ -1347,21 +1378,21 @@ async function persistDealDefaults() {
     applySelection(false);
   });
 
-  // Deal-math build-up: ACV is editable; the tier buttons and the ladder bands
-  // jump the ACV so the retail price lands at that rating. Back into the ACV from
-  // the target retail, applying the store margin rule for the gross at that price.
+  // Deal-math build-up: clicking a tier button or ladder band LOCKS the sale
+  // price to that rating and seeds the ACV so the gross equals the store's margin
+  // rule at that price. After that, changing ACV holds the sale and adjusts gross.
   function jumpAcvTo(retail) {
     if (!Number.isFinite(retail)) return;
     const s = currentSettings || DEFAULTS;
     const feesExGross = num($("recon").value) + num($("dealerFee").value) + num($("titleFee").value);
-    grossUserEdited = false;
-    $("targetGross").value = grossForRetail(retail, s);
-    $("acv").value = Math.max(0, Math.round(retail - feesExGross - num($("targetGross").value))).toLocaleString("en-US");
+    lockedSale = retail;
+    const gross = grossForRetail(retail, s);
+    $("acv").value = Math.max(0, Math.round(retail - feesExGross - gross)).toLocaleString("en-US");
     acvUserEdited = true;
     renderDealMath();
   }
 
-  // Typing marks ACV as user-set so comp toggles won't overwrite it.
+  // Typing ACV holds the locked sale price and lets the gross absorb the change.
   $("acv").addEventListener("input", () => { acvUserEdited = true; renderDealMath(); });
   $("acv").addEventListener("blur", () => { $("acv").value = acvVal().toLocaleString("en-US"); });
   $("quick").addEventListener("click", (e) => {
@@ -1382,10 +1413,11 @@ async function persistDealDefaults() {
   $("ladderBar").addEventListener("keydown", ladderJump);
 
   // Deal math recomputes live. Dealer/title fees are saved as store defaults;
-  // recon is per-vehicle; a hand-typed gross overrides the margin rule.
+  // recon is per-vehicle. Typing a gross UNLOCKS the sale price (it then floats
+  // = ACV + costs + your gross); ACV/cost edits keep the locked sale price.
   ["recon", "dealerFee", "titleFee", "targetGross"].forEach((id) => {
     $(id).addEventListener("input", () => {
-      if (id === "targetGross") grossUserEdited = true;
+      if (id === "targetGross") lockedSale = null;
       renderDealMath();
       if (id === "dealerFee" || id === "titleFee") persistDealDefaults();
     });
