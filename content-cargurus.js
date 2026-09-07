@@ -264,12 +264,40 @@
     return a.length ? a.reduce((s, n) => s + n, 0) / a.length : null;
   };
 
+  // Detect a salvage/branded/rebuilt/flood/lemon title from whatever fields the
+  // listing exposes (CarGurus field names vary), so those cars can be dropped —
+  // they aren't apples-to-apples comps and undercut the customer handout. Scans
+  // boolean flags and title/condition text; ignores "clean"/"no accident" fields.
+  function titleFlags(r) {
+    const BAD_KEY = /(salvage|rebuilt|lemon|flood|junk|dismantl|branded)/i;
+    const BAD_TXT = /\b(salvage|rebuilt|branded|flood|lemon|junk|dismantled|water damage|fire damage|non[-\s]?repairable|parts only)\b/i;
+    const TITLEISH = /(title|salvage|brand|condition|history)/i;
+    let branded = false, why = "";
+    try {
+      for (const k in r) {
+        const v = r[k];
+        if (v == null) continue;
+        const kl = String(k).toLowerCase();
+        if (/clean|noaccident|accidentfree|noframe/.test(kl)) continue; // positive fields
+        if (typeof v === "boolean") {
+          if (v === true && BAD_KEY.test(kl)) { branded = true; why = k; break; }
+        } else if (typeof v === "string") {
+          if (TITLEISH.test(kl) && BAD_TXT.test(v)) { branded = true; why = k + "=" + v; break; }
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return { branded, why };
+  }
+
   function shapeComp(r) {
+    const tf = titleFlags(r);
     return {
       id: r.id,
       year: r.carYear,
       make: r.makeName,
       model: r.modelName,
+      branded: tf.branded,
+      brandedWhy: tf.why,
       trim: r.trimName || "",
       // Detected body style, checking several possible CarGurus fields plus the
       // trim/model text so it works regardless of the exact field name.
@@ -403,6 +431,7 @@
     }
     const scopedToModel = searchEntity !== entity;
 
+    let brandedExcluded = 0;
     let pool = [];
     let usedRadius = spec.radius;
     let rawFetched = 0;
@@ -422,10 +451,14 @@
       if (!sampleModels.length && raw.length) {
         sampleModels = [...new Set(raw.map((r) => ((r && r.modelName) || "?") + " · " + ((r && r.trimName) || "?")))].slice(0, 12);
       }
+      brandedExcluded = 0;
       pool = raw
         .map(shapeComp)
         .filter((c) => modelMatches(model, c.model))
         .filter((c) => !wantBody || !c.body || c.body === wantBody)
+        // Drop salvage/branded/rebuilt-title cars — not comparable, and they
+        // sink the customer handout. Counted so the panel can say how many.
+        .filter((c) => { if (c.branded) { brandedExcluded++; return false; } return true; })
         // When delivery listings are included, keep cars beyond the radius (they
         // ship to the area), matching CarGurus. Otherwise cap at the radius.
         .filter((c) => includeDelivery || !Number.isFinite(c.distance) || c.distance <= radius);
@@ -540,6 +573,7 @@
         exact: exactCount,
         used: comps.length
       },
+      brandedExcluded,
       widenNotes,
       yearFallback,
       trimFallback,

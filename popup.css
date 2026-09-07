@@ -269,6 +269,7 @@ label.chk input { width: auto; }
 .market .supply.hot { color: var(--great); }
 .market .supply.warm { color: var(--fair); }
 .market .supply.slow { color: var(--over); }
+.market .cleanfilter { display:inline-block; margin-top:3px; color: var(--good); font-weight:600; }
 .stale-toggle { display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--muted); margin:8px 0 2px; cursor:pointer; }
 .stale-toggle input { cursor:pointer; }
 td .stale { color: var(--over); font-weight:700; cursor:help; }

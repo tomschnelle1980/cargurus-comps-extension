@@ -9,7 +9,7 @@ const NATIONWIDE_MI = 5000;
 const radLabel = (mi) => (Number(mi) >= NATIONWIDE_MI ? "nationwide" : mi + " mi");
 
 const DEFAULTS = {
-  zip: "", radius: "100", variance: 15000, strictTrim: true, includeDelivery: true, selectors: {},
+  zip: "", radius: "500", variance: 15000, strictTrim: true, includeDelivery: true, selectors: {},
   dealerFee: "", titleFee: "", targetGross: 2500, reconDefault: 2500, theme: "auto",
   // Gross-profit rule: a floor plus a margin (% of retail) by retail-price band.
   // Editable per store in Settings.
@@ -325,7 +325,7 @@ async function loadDefaults() {
   const s = Object.assign({}, DEFAULTS, stored.settings || {});
   applyTheme(s.theme || "auto");
   if (s.zip) $("zip").value = s.zip;
-  $("radius").value = s.radius || "100";
+  $("radius").value = s.radius || "500";
   $("strictTrim").checked = s.strictTrim !== false;
   $("includeDelivery").checked = s.includeDelivery !== false;
   mileVariance = Number.isFinite(s.variance) ? s.variance : 15000;
@@ -451,7 +451,7 @@ function gatherSpec() {
     includeDelivery: $("includeDelivery").checked,
     mileage: parseInt($("mileage").value.replace(/[^\d]/g, ""), 10) || null,
     zip: $("zip").value.replace(/[^\d]/g, ""),
-    radius: parseInt($("radius").value, 10) || 100,
+    radius: parseInt($("radius").value, 10) || 500,
     minMileage: parseInt($("mileMin").value, 10),
     maxMileage: parseInt($("mileMax").value, 10),
     targetCount: 10
@@ -940,6 +940,7 @@ function renderMarket(result) {
     " for sale within " + radLabel(comp.radius) +
     (widened ? " · expanded to <b>" + radLabel(result.usedRadius) + "</b> to reach " + result.counts.used + " comps" : "") +
     supply +
+    (result.brandedExcluded > 0 ? "<br><span class='cleanfilter'>🛡 Excluded " + result.brandedExcluded + " salvage/branded-title listing" + (result.brandedExcluded === 1 ? "" : "s") + "</span>" : "") +
     (buckets.length ? "<br><span class='buckets'>" + buckets.map((b) => b.mi + " mi: <b>" + b.count + "</b>").join(" · ") + "</span>" : "") +
     (notes.length ? "<br><span class='widen'>⚠ Widened: " + notes.map(esc).join(" · ") + "</span>" : "");
 }

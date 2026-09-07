@@ -4,7 +4,7 @@ async function load() {
   const { settings = {} } = await chrome.storage.local.get("settings");
   document.documentElement.setAttribute("data-theme", settings.theme || "auto");
   $("zip").value = settings.zip || "";
-  $("radius").value = settings.radius || "100";
+  $("radius").value = settings.radius || "500";
   $("variance").value = Number.isFinite(settings.variance) ? settings.variance : 10000;
   $("dealerFee").value = settings.dealerFee || "";
   $("titleFee").value = settings.titleFee || "";
