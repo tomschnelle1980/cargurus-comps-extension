@@ -648,10 +648,13 @@ function syncSelAll() {
 
 // The comps shown in the table: only the trim chosen in the filter, so other
 // trims (Rubicon 392 / X / 4xe) don't clutter the list. "*ALL*" shows all.
+// Sorted least-expensive first so a customer can see, top to bottom, what their
+// car is up against in the market (unpriced listings fall to the bottom).
 function displayedComps() {
   const v = ($("trimFilter") && $("trimFilter").value) || "*ALL*";
-  if (v === "*ALL*") return currentComps;
-  return currentComps.filter((c) => normTrim(c.trim) === v);
+  const base = v === "*ALL*" ? currentComps : currentComps.filter((c) => normTrim(c.trim) === v);
+  const priceOf = (c) => (Number.isFinite(c.price) && c.price > 0) ? c.price : Infinity;
+  return base.slice().sort((a, b) => priceOf(a) - priceOf(b));
 }
 
 function renderCompTable() {
