@@ -1255,10 +1255,10 @@ async function findComps() {
   }
 }
 
-// Build the printable comp pool: the SAME comps you're looking at, but hard-
-// filtered to a mileage window around the subject and sorted by closest mileage
-// (then nearest, then cheapest) — so the handout shows genuinely similar cars,
-// not the cheapest high-mileage ones. Widens the window only if too few qualify.
+// Build the printable comp pool: the SAME comps you're looking at, hard-filtered
+// to a mileage window around the subject (so no wildly-off-mileage cars), then
+// sorted CHEAPEST-first — the customer reads the sheet top-to-bottom as the price
+// ladder their car is up against. Widens the window only if too few qualify.
 function buildPrintPool(comps, spec) {
   const subj = Number.isFinite(spec.mileage) ? spec.mileage : null;
   // Prefer the priced trim so the handout isn't a mix of trims.
@@ -1285,10 +1285,11 @@ function buildPrintPool(comps, spec) {
       if (within.length >= 6) break;
     }
   }
+  const priceOf = (c) => (Number.isFinite(c.price) && c.price > 0) ? c.price : Infinity;
   chosen = chosen.slice().sort((a, b) =>
-    (near(a) - near(b)) ||                     // closest mileage first
-    ((a.distance || 0) - (b.distance || 0)) || // then nearest
-    ((a.price || 0) - (b.price || 0))          // then cheapest
+    (priceOf(a) - priceOf(b)) ||               // cheapest first
+    (near(a) - near(b)) ||                     // then closest mileage
+    ((a.distance || 0) - (b.distance || 0))    // then nearest
   ).slice(0, 24);
   return { list: chosen, lo: Math.round(wlo), hi: Number.isFinite(whi) ? Math.round(whi) : null, widened };
 }

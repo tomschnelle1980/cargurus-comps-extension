@@ -415,10 +415,22 @@
       .filter((v) => Number.isFinite(v) && v >= spec.radius);
     const radii = [...new Set(ladder)].sort((a, b) => a - b);
 
-    // Body style is a hard filter: a convertible appraisal must not pull in
-    // sedans/coupes. Comps whose body style we can't identify are kept (unknown
-    // != mismatch), so we only drop a comp we can positively tell is different.
+    // Body style is a hard filter. A car "model" like E-Class spans sedan /
+    // coupe / cabriolet / wagon, so an "E 300" sedan must not pull in "E 400
+    // Cabriolet" convertibles. When the user forces a body, match it exactly.
+    // When it's "Any", derive the subject's body from its trim; the distinctive
+    // shared-name bodies (convertible/coupe/wagon) are the ones that mismatch a
+    // standard sedan, so drop those unless the subject IS one of them. Comps whose
+    // body we can't identify are kept (unknown != mismatch).
     const wantBody = spec.bodyStyle && spec.bodyStyle !== "any" ? String(spec.bodyStyle).toLowerCase() : null;
+    const DISTINCT_BODIES = { convertible: 1, coupe: 1, wagon: 1 };
+    const subjBody = wantBody || bodyStyleOf(((spec.trim || "") + " " + (spec.model || "")));
+    const bodyOk = (c) => {
+      if (!c.body) return true;                 // unknown comp body -> keep
+      if (wantBody) return c.body === wantBody;  // user forced a body -> strict
+      if (subjBody && DISTINCT_BODIES[subjBody]) return c.body === subjBody; // e.g. convertible subject -> convertibles only
+      return !DISTINCT_BODIES[c.body];           // sedan/suv/unknown subject -> drop convertible/coupe/wagon
+    };
     const includeDelivery = spec.includeDelivery !== false;
 
     // Scope to the specific model when we can resolve its entity, so pages come
@@ -455,7 +467,7 @@
       pool = raw
         .map(shapeComp)
         .filter((c) => modelMatches(model, c.model))
-        .filter((c) => !wantBody || !c.body || c.body === wantBody)
+        .filter((c) => bodyOk(c))
         // Drop salvage/branded/rebuilt-title cars — not comparable, and they
         // sink the customer handout. Counted so the panel can say how many.
         .filter((c) => { if (c.branded) { brandedExcluded++; return false; } return true; })
